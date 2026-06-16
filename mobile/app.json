@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Paperless Meeting",
+    "slug": "paperless-meeting-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.paperlessmeeting.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f6f89"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "paperless-meeting-local"
+      }
+    }
+  }
+}
+

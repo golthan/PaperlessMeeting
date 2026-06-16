@@ -1,0 +1,22 @@
+{
+  "name": "paperless-meeting-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start --host lan",
+    "android": "expo start --android",
+    "web": "expo start --web",
+    "export:android": "expo export --platform android --output-dir dist"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.3",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~54.0.35",
+    "expo-document-picker": "~14.0.8",
+    "expo-status-bar": "~3.0.8",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
+  },
+  "devDependencies": {}
+}

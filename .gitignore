@@ -1,0 +1,9 @@
+node_modules/
+.env
+dist/
+coverage/
+*.log
+backend/uploads/*
+!backend/uploads/.gitkeep
+mobile/dist/
+
