@@ -8,10 +8,11 @@ import {
   Save,
   Send,
   Trash2,
+  Video,
   Vote
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../api/client.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
@@ -49,6 +50,7 @@ async function downloadBlob(path, filename) {
 
 export function MeetingDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [meeting, setMeeting] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
@@ -80,6 +82,12 @@ export function MeetingDetailPage() {
 
   const isOrganizer = user.role === "ORGANIZER";
   const isParticipant = user.role === "PARTICIPANT";
+  const hasOnlineRoom = meeting?.meeting_type !== "OFFLINE";
+  const livePath = isOrganizer
+    ? `/organizer/meetings/${id}/live`
+    : isParticipant
+      ? `/participant/meetings/${id}/live`
+      : null;
 
   async function load() {
     const res = await api.get(`/meetings/${id}`);
@@ -114,6 +122,17 @@ export function MeetingDetailPage() {
   }
 
   async function changeMeetingStatus(action) {
+    if (action === "start" && livePath && hasOnlineRoom) {
+      setError("");
+      setMessage("");
+      try {
+        await api.put(`/meetings/${id}/start`);
+        navigate(livePath);
+      } catch (err) {
+        setError(err.response?.data?.message || "Không bắt đầu được cuộc họp");
+      }
+      return;
+    }
     await run(() => api.put(`/meetings/${id}/${action}`), "Đã cập nhật trạng thái cuộc họp");
   }
 
@@ -222,23 +241,46 @@ export function MeetingDetailPage() {
           <p>{meeting.description || "Không có mô tả"}</p>
           <div className="detail-line">
             <span>{formatDateTime(meeting.start_time)}</span>
-            <span>{meeting.room_name}</span>
+            <span>
+              {meeting.meeting_type === "HYBRID"
+                ? [meeting.room_name, meeting.online_room_name].filter(Boolean).join(" + ")
+                : meeting.room_name || meeting.online_room_name || "Phòng online"}
+            </span>
+            <StatusPill value={meeting.meeting_type} />
             <StatusPill value={meeting.status} />
           </div>
         </div>
-        {isOrganizer && (
-          <div className="hero-actions">
-            <button className="secondary-button" onClick={() => changeMeetingStatus("start")}>
-              Bắt đầu
-            </button>
-            <button className="secondary-button" onClick={() => changeMeetingStatus("finish")}>
-              Kết thúc
-            </button>
-            <button className="danger-button" onClick={() => changeMeetingStatus("cancel")}>
-              Hủy
-            </button>
-          </div>
-        )}
+        <div className="hero-actions">
+          {livePath && hasOnlineRoom && meeting.status === "ONGOING" && (
+            <Link className="primary-button" to={livePath}>
+              <Video size={16} />
+              Vào phòng đang họp
+            </Link>
+          )}
+          {isOrganizer && (
+            <>
+            {["UPCOMING", "DRAFT"].includes(meeting.status) && (
+              <button
+                className={hasOnlineRoom ? "primary-button" : "secondary-button"}
+                onClick={() => changeMeetingStatus("start")}
+              >
+                {hasOnlineRoom && <Video size={16} />}
+                {hasOnlineRoom ? "Bắt đầu & vào phòng" : "Bắt đầu"}
+              </button>
+            )}
+            {meeting.status === "ONGOING" && (
+              <button className="secondary-button" onClick={() => changeMeetingStatus("finish")}>
+                Kết thúc
+              </button>
+            )}
+            {!["FINISHED", "CANCELLED"].includes(meeting.status) && (
+              <button className="danger-button" onClick={() => changeMeetingStatus("cancel")}>
+                Hủy
+              </button>
+            )}
+            </>
+          )}
+        </div>
       </section>
 
       <nav className="tabbar">
@@ -759,4 +801,3 @@ export function MeetingDetailPage() {
     </div>
   );
 }
-

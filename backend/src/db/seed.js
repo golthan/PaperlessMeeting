@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { pool } from "../config/db.js";
+import { buildJitsiRoomUrl } from "../utils/jitsi.js";
 import { hashPassword } from "../utils/password.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -13,10 +14,15 @@ async function run() {
 
   await pool.query(`
     TRUNCATE
+      meeting_sessions,
+      personal_notes,
+      meeting_notes,
+      chat_messages,
       vote_responses,
       votes,
       minutes,
       meeting_tasks,
+      attendance,
       attendance_tokens,
       agenda_items,
       documents,
@@ -100,8 +106,10 @@ async function run() {
   tomorrowEnd.setHours(10, 30, 0, 0);
 
   const { rows: meetingRows } = await pool.query(
-    `INSERT INTO meetings (title, description, start_time, end_time, room_id, organizer_id, status, notes)
-     VALUES ($1, $2, $3, $4, $5, $6, 'UPCOMING', $7)
+    `INSERT INTO meetings
+       (title, description, meeting_type, start_time, end_time, room_id, organizer_id,
+        status, online_provider, online_room_name, online_room_url, notes)
+     VALUES ($1, $2, 'HYBRID', $3, $4, $5, $6, 'UPCOMING', 'JITSI', $7, $8, $9)
      RETURNING *`,
     [
       "Hop trien khai ke hoach thang",
@@ -110,15 +118,57 @@ async function run() {
       tomorrowEnd,
       rooms.a101.id,
       users.organizer.id,
+      "paperless-meeting-seed-monthly-plan",
+      buildJitsiRoomUrl("paperless-meeting-seed-monthly-plan"),
       "Seed demo meeting"
     ]
   );
   const meeting = meetingRows[0];
 
+  const onlineStart = new Date(tomorrow);
+  onlineStart.setDate(onlineStart.getDate() + 1);
+  onlineStart.setHours(14, 0, 0, 0);
+  const onlineEnd = new Date(onlineStart);
+  onlineEnd.setHours(15, 0, 0, 0);
+
+  const { rows: onlineMeetingRows } = await pool.query(
+    `INSERT INTO meetings
+       (title, description, meeting_type, start_time, end_time, room_id, organizer_id,
+        status, online_provider, online_room_name, online_room_url, notes)
+     VALUES ($1, $2, 'ONLINE', $3, $4, NULL, $5, 'UPCOMING', 'JITSI', $6, $7, $8)
+     RETURNING *`,
+    [
+      "Hop truc tuyen ra soat tien do",
+      "Phong hop truc tuyen Jitsi cho nhom du an.",
+      onlineStart,
+      onlineEnd,
+      users.organizer.id,
+      "paperless-meeting-seed-progress-review",
+      buildJitsiRoomUrl("paperless-meeting-seed-progress-review"),
+      "Online seed demo"
+    ]
+  );
+  const onlineMeeting = onlineMeetingRows[0];
+
   await pool.query(
-    `INSERT INTO meeting_participants (meeting_id, user_id, invitation_status, role_in_meeting)
-     VALUES ($1, $2, 'PENDING', 'MEMBER'), ($1, $3, 'ACCEPTED', 'SECRETARY')`,
-    [meeting.id, users.participant1.id, users.participant2.id]
+    `INSERT INTO meeting_participants
+       (meeting_id, user_id, invitation_status, role_in_meeting, can_share_screen, can_upload_document, can_speak)
+     VALUES
+       ($1, $2, 'PENDING', 'MEMBER', false, true, true),
+       ($1, $3, 'ACCEPTED', 'SECRETARY', true, true, true),
+       ($4, $2, 'ACCEPTED', 'MEMBER', true, true, true),
+       ($4, $3, 'PENDING', 'MEMBER', false, false, true)`,
+    [meeting.id, users.participant1.id, users.participant2.id, onlineMeeting.id]
+  );
+
+  await pool.query(
+    `INSERT INTO attendance (meeting_id, user_id, status, method)
+     VALUES
+       ($1, $2, 'ABSENT', 'MANUAL'),
+       ($1, $3, 'ABSENT', 'MANUAL'),
+       ($4, $2, 'ABSENT', 'MANUAL'),
+       ($4, $3, 'ABSENT', 'MANUAL')`,
+    [meeting.id, users.participant1.id, users.participant2.id, onlineMeeting.id]
   );
 
   await pool.query(
@@ -147,6 +197,26 @@ async function run() {
     [meeting.id, users.participant1.id, users.organizer.id]
   );
 
+  await pool.query(
+    `INSERT INTO meeting_notes (meeting_id, content, updated_by)
+     VALUES ($1, 'Ghi chu cong khai mau cho phong hop truc tuyen.', $2)`,
+    [meeting.id, users.organizer.id]
+  );
+
+  await pool.query(
+    `INSERT INTO personal_notes (meeting_id, user_id, content)
+     VALUES ($1, $2, 'Ghi chu ca nhan cua participant demo.')`,
+    [meeting.id, users.participant1.id]
+  );
+
+  await pool.query(
+    `INSERT INTO chat_messages (meeting_id, sender_id, content, message_type)
+     VALUES
+       ($1, $2, 'Chao moi nguoi, day la phong hop live demo.', 'TEXT'),
+       ($1, $3, 'Participant da nhan duoc lich hop.', 'TEXT')`,
+    [meeting.id, users.organizer.id, users.participant1.id]
+  );
+
   console.log("Database seeded successfully.");
   console.log("Accounts: admin@example.com / organizer@example.com / participant1@example.com / participant2@example.com");
   console.log("Password for all accounts: 123456");
@@ -160,4 +230,3 @@ run()
   .finally(async () => {
     await pool.end();
   });
-

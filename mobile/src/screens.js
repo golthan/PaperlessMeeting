@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View
 } from "react-native";
 import { apiRequest, documentDownloadUrl } from "./api";
@@ -185,7 +186,7 @@ export function MeetingsScreen({ auth, refreshKey, onOpenMeeting }) {
   async function updateInvitation(meetingId, action) {
     setError("");
     try {
-      await apiRequest(`/meetings/${meetingId}/participants/invitation/${action}`, {
+      await apiRequest(`/meetings/${meetingId}/invitation/${action}`, {
         method: "PUT",
         token: auth.token
       });
@@ -221,7 +222,7 @@ export function MeetingsScreen({ auth, refreshKey, onOpenMeeting }) {
             <CardRow
               key={meeting.id}
               title={meeting.title}
-              subtitle={`${formatDateTime(meeting.start_time)} · ${meeting.room_name}`}
+              subtitle={`${formatDateTime(meeting.start_time)} · ${meeting.room_name || meeting.online_room_name || meeting.meeting_type || ""}`}
               meta={meeting.organizer_name}
               onPress={() => onOpenMeeting(meeting.id)}
               right={
@@ -336,7 +337,7 @@ export function TasksScreen({ auth, refreshKey }) {
   );
 }
 
-export function MeetingDetailScreen({ auth, meetingId }) {
+export function MeetingDetailScreen({ auth, meetingId, onOpenLive }) {
   const [meeting, setMeeting] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [error, setError] = useState("");
@@ -487,7 +488,18 @@ export function MeetingDetailScreen({ auth, meetingId }) {
             <StatusPill value={meeting.status} />
           </View>
           <Text style={styles.muted}>{formatDateTime(meeting.start_time)}</Text>
-          <Text style={styles.muted}>{meeting.room_name}</Text>
+          <Text style={styles.muted}>
+            {meeting.room_name || meeting.online_room_name || meeting.meeting_type}
+          </Text>
+          {onOpenLive && meeting.status === "ONGOING" && meeting.meeting_type !== "OFFLINE" && (
+            <View style={styles.rowWrap}>
+              <PrimaryButton
+                icon="videocam-outline"
+                title="Vào phòng Live"
+                onPress={onOpenLive}
+              />
+            </View>
+          )}
         </Panel>
 
         <ErrorState message={error} />
@@ -746,6 +758,364 @@ function MeetingTasksTab({ meeting, onStatus }) {
   );
 }
 
+export function LiveMeetingScreen({ auth, meetingId }) {
+  const [meeting, setMeeting] = useState(null);
+  const [liveConfig, setLiveConfig] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [publicNotes, setPublicNotes] = useState("");
+  const [personalNotes, setPersonalNotes] = useState("");
+  const [message, setMessage] = useState("");
+  const [activeTab, setActiveTab] = useState("room");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [voteResults, setVoteResults] = useState({});
+
+  const permissions = liveConfig?.permissions || {};
+  const canEditPublicNotes =
+    permissions.isOrganizer || permissions.roleInMeeting === "SECRETARY";
+
+  async function load() {
+    const [
+      meetingResult,
+      configResult,
+      chatResult,
+      publicNotesResult,
+      personalNotesResult
+    ] = await Promise.all([
+      apiRequest(`/meetings/${meetingId}`, { token: auth.token }),
+      apiRequest(`/meetings/${meetingId}/live-config`, { token: auth.token }),
+      apiRequest(`/meetings/${meetingId}/chat?limit=100`, { token: auth.token }),
+      apiRequest(`/meetings/${meetingId}/public-notes`, { token: auth.token }),
+      apiRequest(`/meetings/${meetingId}/personal-notes`, { token: auth.token })
+    ]);
+
+    setMeeting(meetingResult.data);
+    setLiveConfig(configResult.data);
+    setChatMessages(chatResult.data || []);
+    setPublicNotes(publicNotesResult.data?.content || "");
+    setPersonalNotes(personalNotesResult.data?.content || "");
+  }
+
+  useEffect(() => {
+    setLoading(true);
+    setError("");
+    load()
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [meetingId]);
+
+  async function refresh() {
+    setRefreshing(true);
+    setError("");
+    try {
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function run(action, success) {
+    setError("");
+    try {
+      await action();
+      if (success) Alert.alert("Thành công", success);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function openOnlineRoom() {
+    const url = liveConfig?.roomUrl;
+    if (!url) {
+      Alert.alert("Chưa có phòng online", "Cuộc họp này chưa có link Jitsi.");
+      return;
+    }
+    await Linking.openURL(url);
+  }
+
+  async function checkIn() {
+    await run(
+      () =>
+        apiRequest(`/meetings/${meetingId}/attendance/checkin`, {
+          method: "POST",
+          token: auth.token,
+          body: {}
+        }),
+      "Bạn đã điểm danh."
+    );
+  }
+
+  async function sendChatMessage() {
+    const content = message.trim();
+    if (!content) return;
+    await run(() =>
+      apiRequest(`/meetings/${meetingId}/chat`, {
+        method: "POST",
+        token: auth.token,
+        body: { content }
+      })
+    );
+    setMessage("");
+  }
+
+  async function savePersonalNotes() {
+    await run(
+      () =>
+        apiRequest(`/meetings/${meetingId}/personal-notes`, {
+          method: "PUT",
+          token: auth.token,
+          body: { content: personalNotes }
+        }),
+      "Ghi chú cá nhân đã lưu."
+    );
+  }
+
+  async function savePublicNotes() {
+    await run(
+      () =>
+        apiRequest(`/meetings/${meetingId}/public-notes`, {
+          method: "PUT",
+          token: auth.token,
+          body: { content: publicNotes }
+        }),
+      "Ghi chú chung đã lưu."
+    );
+  }
+
+  async function answerVote(voteId, answer) {
+    await run(
+      () =>
+        apiRequest(`/votes/${voteId}/responses`, {
+          method: "POST",
+          token: auth.token,
+          body: { answer }
+        }),
+      "Đã gửi phiếu biểu quyết."
+    );
+  }
+
+  async function loadResults(voteId) {
+    setError("");
+    try {
+      const result = await apiRequest(`/votes/${voteId}/results`, {
+        token: auth.token
+      });
+      setVoteResults((current) => ({
+        ...current,
+        [voteId]: result.data.results || []
+      }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  if (loading) return <LoadingState />;
+
+  return (
+    <View style={styles.detailShell}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBar}>
+        {liveTabs.map((tab) => (
+          <Pressable
+            key={tab.key}
+            style={[styles.tabChip, activeTab === tab.key && styles.tabChipActive]}
+            onPress={() => setActiveTab(tab.key)}
+          >
+            <Ionicons
+              name={tab.icon}
+              size={16}
+              color={activeTab === tab.key ? colors.primary : colors.muted}
+            />
+            <Text style={[styles.tabChipText, activeTab === tab.key && styles.tabChipTextActive]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.screenContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+      >
+        <ErrorState message={error} />
+        {!meeting || !liveConfig ? (
+          <EmptyState title="Không tải được phòng Live" />
+        ) : (
+          <>
+            <Panel>
+              <View style={styles.rowBetween}>
+                <Text style={styles.meetingTitle}>{meeting.title}</Text>
+                <StatusPill value={meeting.status} />
+              </View>
+              <Text style={styles.muted}>{formatDateTime(meeting.start_time)}</Text>
+              <Text style={styles.muted}>
+                {meeting.room_name || liveConfig.roomName || meeting.meeting_type}
+              </Text>
+              <View style={styles.rowWrap}>
+                <StatusPill value={meeting.meeting_type} />
+                <StatusPill value={permissions.roleInMeeting || "MEMBER"} />
+              </View>
+            </Panel>
+
+            {activeTab === "room" && (
+              <Panel>
+                <SectionTitle title="Phòng họp trực tuyến" />
+                <View style={styles.stack}>
+                  <PrimaryButton
+                    icon="videocam-outline"
+                    title="Mở Jitsi"
+                    onPress={openOnlineRoom}
+                    disabled={!liveConfig.roomUrl}
+                  />
+                  <SecondaryButton
+                    icon="checkmark-outline"
+                    title="Điểm danh"
+                    onPress={checkIn}
+                    disabled={meeting.status !== "ONGOING"}
+                  />
+                  <View style={styles.permissionGrid}>
+                    <View style={styles.permissionItem}>
+                      <Ionicons name="mic-outline" size={18} color={colors.primary} />
+                      <Text style={styles.permissionText}>
+                        {permissions.canSpeak ? "Được phát biểu" : "Tắt quyền phát biểu"}
+                      </Text>
+                    </View>
+                    <View style={styles.permissionItem}>
+                      <Ionicons name="share-outline" size={18} color={colors.primary} />
+                      <Text style={styles.permissionText}>
+                        {permissions.canShareScreen ? "Được chia sẻ" : "Không chia sẻ"}
+                      </Text>
+                    </View>
+                    <View style={styles.permissionItem}>
+                      <Ionicons name="cloud-upload-outline" size={18} color={colors.primary} />
+                      <Text style={styles.permissionText}>
+                        {permissions.canUploadDocument ? "Được gửi tài liệu" : "Không gửi tài liệu"}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </Panel>
+            )}
+
+            {activeTab === "chat" && (
+              <Panel>
+                <SectionTitle title="Chat cuộc họp" />
+                <View style={styles.stack}>
+                  {chatMessages.length === 0 ? (
+                    <EmptyState title="Chưa có tin nhắn" />
+                  ) : (
+                    chatMessages.map((item) => (
+                      <View
+                        key={item.id}
+                        style={[
+                          styles.messageBubble,
+                          item.sender_id === auth.user.id && styles.messageBubbleMine
+                        ]}
+                      >
+                        <Text style={styles.messageAuthor}>
+                          {item.sender_name || item.sender_email}
+                        </Text>
+                        <Text style={styles.messageText}>{item.content}</Text>
+                      </View>
+                    ))
+                  )}
+                  <TextInput
+                    style={styles.textAreaSmall}
+                    value={message}
+                    onChangeText={setMessage}
+                    placeholder="Nhập tin nhắn..."
+                    placeholderTextColor={colors.muted}
+                    multiline
+                  />
+                  <PrimaryButton
+                    icon="send-outline"
+                    title="Gửi"
+                    onPress={sendChatMessage}
+                  />
+                </View>
+              </Panel>
+            )}
+
+            {activeTab === "notes" && (
+              <View style={styles.stack}>
+                <Panel>
+                  <SectionTitle
+                    title="Ghi chú chung"
+                    action={
+                      canEditPublicNotes ? (
+                        <SecondaryButton
+                          icon="save-outline"
+                          title="Lưu"
+                          onPress={savePublicNotes}
+                        />
+                      ) : null
+                    }
+                  />
+                  <TextInput
+                    style={styles.textArea}
+                    value={publicNotes}
+                    onChangeText={setPublicNotes}
+                    editable={canEditPublicNotes}
+                    placeholder="Chưa có ghi chú chung"
+                    placeholderTextColor={colors.muted}
+                    multiline
+                  />
+                </Panel>
+                <Panel>
+                  <SectionTitle
+                    title="Ghi chú cá nhân"
+                    action={
+                      <SecondaryButton
+                        icon="save-outline"
+                        title="Lưu"
+                        onPress={savePersonalNotes}
+                      />
+                    }
+                  />
+                  <TextInput
+                    style={styles.textArea}
+                    value={personalNotes}
+                    onChangeText={setPersonalNotes}
+                    placeholder="Ghi chú riêng của bạn"
+                    placeholderTextColor={colors.muted}
+                    multiline
+                  />
+                </Panel>
+              </View>
+            )}
+
+            {activeTab === "agenda" && <AgendaTab meeting={meeting} />}
+            {activeTab === "documents" && (
+              <DocumentsTab
+                meeting={meeting}
+                token={auth.token}
+                onUpload={() =>
+                  Alert.alert(
+                    "Upload tài liệu",
+                    "Vui lòng gửi tài liệu từ màn hình chi tiết cuộc họp."
+                  )
+                }
+              />
+            )}
+            {activeTab === "votes" && (
+              <VotesTab
+                meeting={meeting}
+                results={voteResults}
+                onAnswer={answerVote}
+                onResults={loadResults}
+              />
+            )}
+          </>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
 function normalizeOptions(options) {
   if (Array.isArray(options)) return options;
   try {
@@ -763,6 +1133,15 @@ const detailTabs = [
   { key: "votes", label: "Vote", icon: "checkbox-outline" },
   { key: "minutes", label: "Biên bản", icon: "reader-outline" },
   { key: "tasks", label: "Task", icon: "briefcase-outline" }
+];
+
+const liveTabs = [
+  { key: "room", label: "Phòng", icon: "videocam-outline" },
+  { key: "chat", label: "Chat", icon: "chatbubbles-outline" },
+  { key: "notes", label: "Ghi chú", icon: "create-outline" },
+  { key: "agenda", label: "Agenda", icon: "list-outline" },
+  { key: "documents", label: "Tài liệu", icon: "document-text-outline" },
+  { key: "votes", label: "Vote", icon: "checkbox-outline" }
 ];
 
 const styles = StyleSheet.create({
@@ -970,6 +1349,64 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
     lineHeight: 23
+  },
+  permissionGrid: {
+    gap: spacing.sm
+  },
+  permissionItem: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSoft,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    padding: spacing.sm
+  },
+  permissionText: {
+    color: colors.text,
+    flex: 1,
+    fontWeight: "800"
+  },
+  messageBubble: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.surfaceSoft,
+    borderRadius: 8,
+    maxWidth: "92%",
+    padding: spacing.sm
+  },
+  messageBubbleMine: {
+    alignSelf: "flex-end",
+    backgroundColor: "#e2f3ee"
+  },
+  messageAuthor: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "900",
+    marginBottom: 3
+  },
+  messageText: {
+    color: colors.text,
+    lineHeight: 20
+  },
+  textArea: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    color: colors.text,
+    minHeight: 150,
+    padding: spacing.md,
+    textAlignVertical: "top"
+  },
+  textAreaSmall: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    color: colors.text,
+    minHeight: 74,
+    padding: spacing.md,
+    textAlignVertical: "top"
   }
 });
-

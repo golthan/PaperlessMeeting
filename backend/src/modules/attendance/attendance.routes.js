@@ -15,6 +15,7 @@ import {
   assertMeetingOrganizer,
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
+import { emitMeetingEvent } from "../../config/socket.js";
 
 export const attendanceRouter = express.Router({ mergeParams: true });
 
@@ -86,6 +87,24 @@ attendanceRouter.post(
       [method, req.params.meetingId, req.user.id]
     );
 
+    await pool.query(
+      `INSERT INTO attendance (meeting_id, user_id, checkin_time, method, status, updated_at)
+       VALUES ($1, $2, now(), $3, 'PRESENT', now())
+       ON CONFLICT (meeting_id, user_id) DO UPDATE
+         SET checkin_time = COALESCE(attendance.checkin_time, now()),
+             method = EXCLUDED.method,
+             status = 'PRESENT',
+             updated_at = now()`,
+      [req.params.meetingId, req.user.id, method]
+    );
+
+    emitMeetingEvent(req.params.meetingId, "attendance_updated", {
+      meetingId: req.params.meetingId,
+      userId: req.user.id,
+      status: "PRESENT",
+      method
+    });
+
     res.json({ data: rows[0] });
   })
 );
@@ -97,9 +116,11 @@ attendanceRouter.get(
     const { rows } = await pool.query(
       `SELECT mp.user_id, u.full_name, u.email, mp.invitation_status,
               COALESCE(mp.attendance_status, 'ABSENT') AS attendance_status,
-              mp.attendance_method, mp.checked_in_at
+              mp.attendance_method, mp.checked_in_at,
+              a.status AS archive_status, a.method AS archive_method, a.checkin_time
        FROM meeting_participants mp
        JOIN users u ON u.id = mp.user_id
+       LEFT JOIN attendance a ON a.meeting_id = mp.meeting_id AND a.user_id = mp.user_id
        WHERE mp.meeting_id = $1
        ORDER BY u.full_name ASC`,
       [req.params.meetingId]
@@ -126,7 +147,24 @@ attendanceRouter.put(
       [req.body.status, req.params.meetingId, req.params.userId]
     );
     if (!rows[0]) throw notFound("Participant not found");
+    await pool.query(
+      `INSERT INTO attendance (meeting_id, user_id, checkin_time, method, status, updated_at)
+       VALUES ($1, $2, CASE WHEN $3 = 'PRESENT' THEN now() ELSE NULL END, 'MANUAL', $3, now())
+       ON CONFLICT (meeting_id, user_id) DO UPDATE
+         SET checkin_time = CASE WHEN $3 = 'PRESENT' THEN COALESCE(attendance.checkin_time, now()) ELSE attendance.checkin_time END,
+             method = 'MANUAL',
+             status = $3,
+             updated_at = now()`,
+      [req.params.meetingId, req.params.userId, req.body.status]
+    );
+
+    emitMeetingEvent(req.params.meetingId, "attendance_updated", {
+      meetingId: req.params.meetingId,
+      userId: req.params.userId,
+      status: req.body.status,
+      method: "MANUAL"
+    });
+
     res.json({ data: rows[0] });
   })
 );
-

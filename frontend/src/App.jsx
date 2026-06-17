@@ -9,6 +9,7 @@ import { RoomsPage } from "./pages/admin/RoomsPage.jsx";
 import { UsersPage } from "./pages/admin/UsersPage.jsx";
 import { MeetingsPage } from "./pages/meetings/MeetingsPage.jsx";
 import { MeetingDetailPage } from "./pages/meetings/MeetingDetailPage.jsx";
+import { LiveMeetingPage } from "./pages/meetings/LiveMeetingPage.jsx";
 import { MyTasksPage } from "./pages/participant/MyTasksPage.jsx";
 
 function ProtectedRoute({ roles, children }) {
@@ -107,6 +108,14 @@ export function App() {
           }
         />
         <Route
+          path="/organizer/meetings/:id/live"
+          element={
+            <ProtectedRoute roles={["ORGANIZER"]}>
+              <LiveMeetingPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/organizer/meetings/:id"
           element={
             <ProtectedRoute roles={["ORGANIZER"]}>
@@ -132,6 +141,14 @@ export function App() {
           }
         />
         <Route
+          path="/participant/meetings/:id/live"
+          element={
+            <ProtectedRoute roles={["PARTICIPANT"]}>
+              <LiveMeetingPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/participant/meetings/:id"
           element={
             <ProtectedRoute roles={["PARTICIPANT"]}>
@@ -153,4 +170,3 @@ export function App() {
     </Routes>
   );
 }
-

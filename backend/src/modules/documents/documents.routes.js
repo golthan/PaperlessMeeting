@@ -18,6 +18,7 @@ import {
   assertMeetingOrganizer,
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
+import { emitMeetingEvent } from "../../config/socket.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,6 +81,15 @@ meetingDocumentsRouter.post(
       status = "APPROVED";
     } else if (req.user.role === "PARTICIPANT") {
       await assertParticipantAccess(req.user, req.params.meetingId);
+      const permission = await pool.query(
+        `SELECT can_upload_document
+         FROM meeting_participants
+         WHERE meeting_id = $1 AND user_id = $2`,
+        [req.params.meetingId, req.user.id]
+      );
+      if (!permission.rows[0]?.can_upload_document) {
+        throw forbidden("You are not allowed to upload documents in this meeting");
+      }
     } else {
       throw forbidden("Only organizers or participants can upload documents");
     }
@@ -196,3 +206,50 @@ documentsRouter.put(
   })
 );
 
+documentsRouter.put(
+  "/:id/present",
+  requireRole("ORGANIZER"),
+  asyncHandler(async (req, res) => {
+    const document = await getDocument(req.params.id);
+    await assertMeetingOrganizer(req.user, document.meeting_id);
+
+    const { rows } = await pool.query(
+      `WITH cleared AS (
+         UPDATE documents
+         SET is_presenting = false, updated_at = now()
+         WHERE meeting_id = $1 AND deleted_at IS NULL
+       )
+       UPDATE documents
+       SET is_presenting = true,
+           current_page = COALESCE($2, current_page),
+           updated_at = now()
+       WHERE id = $3
+       RETURNING *`,
+      [document.meeting_id, req.body.currentPage || 1, req.params.id]
+    );
+
+    emitMeetingEvent(document.meeting_id, "current_document_updated", rows[0]);
+    res.json({ data: rows[0] });
+  })
+);
+
+documentsRouter.put(
+  "/:id/page",
+  requireRole("ORGANIZER"),
+  asyncHandler(async (req, res) => {
+    const document = await getDocument(req.params.id);
+    await assertMeetingOrganizer(req.user, document.meeting_id);
+    const currentPage = Math.max(Number(req.body.currentPage || 1), 1);
+
+    const { rows } = await pool.query(
+      `UPDATE documents
+       SET current_page = $1, is_presenting = true, updated_at = now()
+       WHERE id = $2
+       RETURNING *`,
+      [currentPage, req.params.id]
+    );
+
+    emitMeetingEvent(document.meeting_id, "current_document_updated", rows[0]);
+    res.json({ data: rows[0] });
+  })
+);

@@ -14,6 +14,7 @@ import {
   assertMeetingOrganizer,
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
+import { emitMeetingEvent } from "../../config/socket.js";
 
 export const meetingVotesRouter = express.Router({ mergeParams: true });
 export const votesRouter = express.Router();
@@ -124,6 +125,25 @@ votesRouter.put(
 );
 
 votesRouter.put(
+  "/:id/open",
+  requireRole("ORGANIZER"),
+  asyncHandler(async (req, res) => {
+    const vote = await getVote(req.params.id);
+    await assertMeetingOrganizer(req.user, vote.meeting_id);
+
+    const { rows } = await pool.query(
+      `UPDATE votes
+       SET status = 'OPEN', opened_at = COALESCE(opened_at, now()), updated_at = now()
+       WHERE id = $1
+       RETURNING *`,
+      [req.params.id]
+    );
+    emitMeetingEvent(vote.meeting_id, "vote_opened", rows[0]);
+    res.json({ data: rows[0] });
+  })
+);
+
+votesRouter.put(
   "/:id/close",
   requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
@@ -131,11 +151,12 @@ votesRouter.put(
     await assertMeetingOrganizer(req.user, vote.meeting_id);
 
     const { rows } = await pool.query(
-      `UPDATE votes SET status = 'CLOSED', updated_at = now()
+      `UPDATE votes SET status = 'CLOSED', closed_at = now(), updated_at = now()
        WHERE id = $1
        RETURNING *`,
       [req.params.id]
     );
+    emitMeetingEvent(vote.meeting_id, "vote_closed", rows[0]);
     res.json({ data: rows[0] });
   })
 );
@@ -169,6 +190,18 @@ votesRouter.post(
        RETURNING *`,
       [req.params.id, req.user.id, answer]
     );
+    const resultRows = await pool.query(
+      `SELECT answer, COUNT(*)::int AS count
+       FROM vote_responses
+       WHERE vote_id = $1
+       GROUP BY answer
+       ORDER BY answer ASC`,
+      [req.params.id]
+    );
+    emitMeetingEvent(vote.meeting_id, "vote_result_updated", {
+      voteId: req.params.id,
+      results: resultRows.rows
+    });
     res.status(201).json({ data: rows[0] });
   })
 );
@@ -190,4 +223,3 @@ votesRouter.get(
     res.json({ data: { vote, results: rows } });
   })
 );
-

@@ -9,6 +9,7 @@ import {
   assertMeetingAccess,
   assertMeetingOrganizer
 } from "../meetings/meetingAccess.js";
+import { emitMeetingEvent } from "../../config/socket.js";
 
 export const meetingAgendaRouter = express.Router({ mergeParams: true });
 export const agendaRouter = express.Router();
@@ -47,14 +48,15 @@ meetingAgendaRouter.post(
 
     const { rows } = await pool.query(
       `INSERT INTO agenda_items
-        (meeting_id, title, description, presenter_id, duration_minutes, sort_order)
-       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0))
+        (meeting_id, title, description, presenter_id, related_document_id, duration_minutes, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 0))
        RETURNING *`,
       [
         req.params.meetingId,
         req.body.title.trim(),
         req.body.description || null,
         req.body.presenterId || null,
+        req.body.relatedDocumentId || null,
         Number(req.body.durationMinutes || 0),
         req.body.sortOrder
       ]
@@ -97,15 +99,17 @@ agendaRouter.put(
        SET title = COALESCE($1, title),
            description = $2,
            presenter_id = $3,
-           duration_minutes = COALESCE($4, duration_minutes),
-           sort_order = COALESCE($5, sort_order),
+           related_document_id = $4,
+           duration_minutes = COALESCE($5, duration_minutes),
+           sort_order = COALESCE($6, sort_order),
            updated_at = now()
-       WHERE id = $6
+       WHERE id = $7
        RETURNING *`,
       [
         req.body.title || null,
         req.body.description || null,
         req.body.presenterId || null,
+        req.body.relatedDocumentId || null,
         req.body.durationMinutes === undefined ? null : Number(req.body.durationMinutes),
         req.body.sortOrder === undefined ? null : Number(req.body.sortOrder),
         req.params.id
@@ -126,3 +130,47 @@ agendaRouter.delete(
   })
 );
 
+agendaRouter.put(
+  "/:id/current",
+  requireRole("ORGANIZER"),
+  asyncHandler(async (req, res) => {
+    const item = await getAgendaItem(req.params.id);
+    await assertMeetingOrganizer(req.user, item.meeting_id);
+
+    const { rows } = await pool.query(
+      `WITH reset AS (
+         UPDATE agenda_items
+         SET status = 'PENDING', updated_at = now()
+         WHERE meeting_id = $1 AND status = 'CURRENT'
+       )
+       UPDATE agenda_items
+       SET status = 'CURRENT', updated_at = now()
+       WHERE id = $2
+       RETURNING *`,
+      [item.meeting_id, req.params.id]
+    );
+
+    emitMeetingEvent(item.meeting_id, "current_agenda_updated", rows[0]);
+    res.json({ data: rows[0] });
+  })
+);
+
+agendaRouter.put(
+  "/:id/done",
+  requireRole("ORGANIZER"),
+  asyncHandler(async (req, res) => {
+    const item = await getAgendaItem(req.params.id);
+    await assertMeetingOrganizer(req.user, item.meeting_id);
+
+    const { rows } = await pool.query(
+      `UPDATE agenda_items
+       SET status = 'DONE', updated_at = now()
+       WHERE id = $1
+       RETURNING *`,
+      [req.params.id]
+    );
+
+    emitMeetingEvent(item.meeting_id, "current_agenda_updated", rows[0]);
+    res.json({ data: rows[0] });
+  })
+);

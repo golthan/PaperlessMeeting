@@ -12,8 +12,22 @@ import {
 } from "../meetings/meetingAccess.js";
 
 export const participantsRouter = express.Router({ mergeParams: true });
+export const invitationRouter = express.Router({ mergeParams: true });
 
 participantsRouter.use(authenticate);
+invitationRouter.use(authenticate);
+
+async function updateMyInvitation(user, meetingId, status) {
+  await assertParticipantAccess(user, meetingId);
+  const { rows } = await pool.query(
+    `UPDATE meeting_participants
+     SET invitation_status = $1, updated_at = now()
+     WHERE meeting_id = $2 AND user_id = $3
+     RETURNING *`,
+    [status, meetingId, user.id]
+  );
+  return rows[0];
+}
 
 participantsRouter.get(
   "/",
@@ -56,11 +70,25 @@ participantsRouter.post(
       if (!user.rows[0]) throw notFound(`User ${userId} not found`);
 
       const { rows } = await pool.query(
-        `INSERT INTO meeting_participants (meeting_id, user_id, role_in_meeting)
-         VALUES ($1, $2, COALESCE($3, 'MEMBER'))
+        `INSERT INTO meeting_participants
+           (meeting_id, user_id, role_in_meeting, can_share_screen, can_upload_document, can_speak)
+         VALUES ($1, $2, COALESCE($3, 'MEMBER'), $4, $5, $6)
          ON CONFLICT (meeting_id, user_id) DO NOTHING
          RETURNING *`,
-        [req.params.meetingId, userId, req.body.roleInMeeting || null]
+        [
+          req.params.meetingId,
+          userId,
+          req.body.roleInMeeting || null,
+          Boolean(req.body.canShareScreen),
+          req.body.canUploadDocument !== false,
+          req.body.canSpeak !== false
+        ]
+      );
+      await pool.query(
+        `INSERT INTO attendance (meeting_id, user_id)
+         VALUES ($1, $2)
+         ON CONFLICT (meeting_id, user_id) DO NOTHING`,
+        [req.params.meetingId, userId]
       );
       if (rows[0]) inserted.push(rows[0]);
     }
@@ -88,18 +116,41 @@ participantsRouter.delete(
 );
 
 participantsRouter.put(
+  "/:userId",
+  requireRole("ORGANIZER"),
+  asyncHandler(async (req, res) => {
+    await assertMeetingOrganizer(req.user, req.params.meetingId);
+
+    const { rows } = await pool.query(
+      `UPDATE meeting_participants
+       SET role_in_meeting = COALESCE($1, role_in_meeting),
+           can_share_screen = COALESCE($2, can_share_screen),
+           can_upload_document = COALESCE($3, can_upload_document),
+           can_speak = COALESCE($4, can_speak),
+           updated_at = now()
+       WHERE meeting_id = $5 AND user_id = $6
+       RETURNING *`,
+      [
+        req.body.roleInMeeting || null,
+        req.body.canShareScreen === undefined ? null : Boolean(req.body.canShareScreen),
+        req.body.canUploadDocument === undefined ? null : Boolean(req.body.canUploadDocument),
+        req.body.canSpeak === undefined ? null : Boolean(req.body.canSpeak),
+        req.params.meetingId,
+        req.params.userId
+      ]
+    );
+    if (!rows[0]) throw notFound("Participant not found");
+    res.json({ data: rows[0] });
+  })
+);
+
+participantsRouter.put(
   "/invitation/accept",
   requireRole("PARTICIPANT"),
   asyncHandler(async (req, res) => {
-    await assertParticipantAccess(req.user, req.params.meetingId);
-    const { rows } = await pool.query(
-      `UPDATE meeting_participants
-       SET invitation_status = 'ACCEPTED', updated_at = now()
-       WHERE meeting_id = $1 AND user_id = $2
-       RETURNING *`,
-      [req.params.meetingId, req.user.id]
-    );
-    res.json({ data: rows[0] });
+    res.json({
+      data: await updateMyInvitation(req.user, req.params.meetingId, "ACCEPTED")
+    });
   })
 );
 
@@ -107,15 +158,29 @@ participantsRouter.put(
   "/invitation/decline",
   requireRole("PARTICIPANT"),
   asyncHandler(async (req, res) => {
-    await assertParticipantAccess(req.user, req.params.meetingId);
-    const { rows } = await pool.query(
-      `UPDATE meeting_participants
-       SET invitation_status = 'DECLINED', updated_at = now()
-       WHERE meeting_id = $1 AND user_id = $2
-       RETURNING *`,
-      [req.params.meetingId, req.user.id]
-    );
-    res.json({ data: rows[0] });
+    res.json({
+      data: await updateMyInvitation(req.user, req.params.meetingId, "DECLINED")
+    });
+  })
+);
+
+invitationRouter.put(
+  "/accept",
+  requireRole("PARTICIPANT"),
+  asyncHandler(async (req, res) => {
+    res.json({
+      data: await updateMyInvitation(req.user, req.params.meetingId, "ACCEPTED")
+    });
+  })
+);
+
+invitationRouter.put(
+  "/decline",
+  requireRole("PARTICIPANT"),
+  asyncHandler(async (req, res) => {
+    res.json({
+      data: await updateMyInvitation(req.user, req.params.meetingId, "DECLINED")
+    });
   })
 );
 
@@ -137,4 +202,3 @@ participantsRouter.put(
     res.json({ data: rows[0] });
   })
 );
-

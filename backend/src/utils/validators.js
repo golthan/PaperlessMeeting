@@ -10,10 +10,13 @@ export const MEETING_STATUSES = [
   "FINISHED",
   "CANCELLED"
 ];
+export const MEETING_TYPES = ["ONLINE", "OFFLINE", "HYBRID"];
+export const ONLINE_PROVIDERS = ["JITSI", "CUSTOM"];
 export const INVITATION_STATUSES = ["PENDING", "ACCEPTED", "DECLINED"];
 export const ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "LATE"];
 export const DOCUMENT_STATUSES = ["PENDING", "APPROVED", "REJECTED"];
-export const VOTE_STATUSES = ["OPEN", "CLOSED"];
+export const AGENDA_STATUSES = ["PENDING", "CURRENT", "DONE"];
+export const VOTE_STATUSES = ["DRAFT", "OPEN", "CLOSED"];
 export const VOTE_TYPES = ["YES_NO_ABSTAIN", "MULTIPLE_CHOICE"];
 export const MINUTES_STATUSES = ["DRAFT", "PUBLISHED"];
 export const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE", "OVERDUE"];
@@ -58,4 +61,3 @@ export function assertTimeRange(startTime, endTime) {
     throw badRequest("Start time must be before end time");
   }
 }
-

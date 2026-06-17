@@ -8,6 +8,7 @@ import {
 } from "./src/storage";
 import {
   DashboardScreen,
+  LiveMeetingScreen,
   LoginScreen,
   MeetingDetailScreen,
   MeetingsScreen,
@@ -72,16 +73,18 @@ export default function App() {
   }
 
   const showDetail = screen.name === "meetingDetail";
+  const showLive = screen.name === "liveMeeting";
+  const showNested = showDetail || showLive;
 
   return (
     <SafeAreaView style={styles.shell}>
       <ExpoStatusBar style="dark" />
       <StatusBar barStyle="dark-content" backgroundColor={colors.surface} />
       <Header
-        title={showDetail ? "Chi tiết cuộc họp" : titleByScreen(screen.name)}
+        title={showLive ? "Phòng họp Live" : showDetail ? "Chi tiết cuộc họp" : titleByScreen(screen.name)}
         subtitle={user.full_name || user.email}
         onLogout={auth.logout}
-        onBack={showDetail ? () => setScreen({ name: "meetings" }) : null}
+        onBack={showNested ? () => setScreen({ name: "meetings" }) : null}
       />
       <View style={styles.content}>
         {screen.name === "dashboard" && (
@@ -102,10 +105,19 @@ export default function App() {
             auth={auth}
             meetingId={screen.meetingId}
             onBack={() => setScreen({ name: "meetings" })}
+            onOpenLive={() =>
+              setScreen({ name: "liveMeeting", meetingId: screen.meetingId })
+            }
+          />
+        )}
+        {showLive && (
+          <LiveMeetingScreen
+            auth={auth}
+            meetingId={screen.meetingId}
           />
         )}
       </View>
-      {!showDetail && (
+      {!showNested && (
         <BottomTabs active={screen.name} onChange={(name) => setScreen({ name })} />
       )}
     </SafeAreaView>
@@ -127,4 +139,3 @@ const styles = StyleSheet.create({
     flex: 1
   }
 });
-

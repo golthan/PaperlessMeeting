@@ -6,7 +6,7 @@ export async function getMeeting(meetingId) {
     `SELECT m.*, r.name AS room_name, r.location AS room_location,
             u.full_name AS organizer_name, u.email AS organizer_email
      FROM meetings m
-     JOIN rooms r ON r.id = m.room_id
+     LEFT JOIN rooms r ON r.id = m.room_id
      JOIN users u ON u.id = m.organizer_id
      WHERE m.id = $1 AND m.deleted_at IS NULL`,
     [meetingId]
@@ -90,4 +90,3 @@ export async function assertUserIsParticipantOfMeeting(meetingId, userId) {
     throw forbidden("Assigned user must be a meeting participant");
   }
 }
-

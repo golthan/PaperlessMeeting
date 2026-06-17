@@ -25,11 +25,15 @@ const tones = {
   OVERDUE: "danger",
   PRESENT: "success",
   ABSENT: "neutral",
-  LATE: "warning"
+  LATE: "warning",
+  ONLINE: "success",
+  HAND: "warning",
+  HYBRID: "info",
+  ONLINE_MEETING: "info",
+  OFFLINE: "neutral"
 };
 
 export function StatusPill({ value }) {
   if (!value) return <span className="pill neutral">-</span>;
   return <span className={`pill ${tones[value] || "neutral"}`}>{value}</span>;
 }
-

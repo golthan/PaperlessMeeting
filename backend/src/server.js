@@ -1,11 +1,16 @@
 import { app } from "./app.js";
 import { pool } from "./config/db.js";
 import { env } from "./config/env.js";
+import { initSocket } from "./config/socket.js";
 import { ensureUploadDir } from "./utils/file.js";
+import http from "http";
 
 ensureUploadDir();
 
-const server = app.listen(env.port, () => {
+const server = http.createServer(app);
+initSocket(server);
+
+server.listen(env.port, () => {
   console.log(`Paperless Meeting API is running at http://localhost:${env.port}`);
 });
 
@@ -19,4 +24,3 @@ async function shutdown() {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
-
