@@ -2,6 +2,7 @@ import { LogIn } from "lucide-react";
 import { useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { roleHome, useAuth } from "../../auth/AuthContext.jsx";
+import logoHvktmm from "../../assets/logo-hvktmm.png";
 
 export function LoginPage() {
   const { user, login } = useAuth();
@@ -35,8 +36,13 @@ export function LoginPage() {
     <main className="auth-screen">
       <section className="auth-panel">
         <div className="auth-copy">
-          <div className="brand-mark large">PM</div>
+          <img
+            className="auth-logo"
+            src={logoHvktmm}
+            alt="Học viện Kỹ thuật Mật mã"
+          />
           <h1>Paperless Meeting</h1>
+          <p className="auth-academy">Học viện Kỹ thuật Mật mã</p>
           <p>Quản lý phòng họp, tài liệu, điểm danh, biểu quyết, biên bản và nhiệm vụ sau họp.</p>
         </div>
         <form className="auth-form" onSubmit={submit}>

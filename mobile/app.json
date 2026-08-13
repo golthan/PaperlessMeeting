@@ -5,13 +5,15 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "backgroundColor": "#eef4f5",
+    "primaryColor": "#0e7490",
     "assetBundlePatterns": [
       "**/*"
     ],
     "android": {
       "package": "com.paperlessmeeting.mobile",
       "adaptiveIcon": {
-        "backgroundColor": "#0f6f89"
+        "backgroundColor": "#0e7490"
       }
     },
     "extra": {

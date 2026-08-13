@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, SafeAreaView, StatusBar, StyleSheet, View } from "react-native";
+import { Alert, Platform, SafeAreaView, StatusBar, StyleSheet, View } from "react-native";
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import {
   clearSession,
@@ -133,7 +133,9 @@ function titleByScreen(name) {
 const styles = StyleSheet.create({
   shell: {
     flex: 1,
-    backgroundColor: colors.background
+    backgroundColor: colors.background,
+    // SafeAreaView không tự chừa status bar trên Android
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0
   },
   content: {
     flex: 1

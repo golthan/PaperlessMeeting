@@ -4,7 +4,6 @@ import {
   Clock,
   DoorOpen,
   Eye,
-  Plus,
   Users,
   Video,
   X
@@ -15,7 +14,8 @@ import { api } from "../../api/client.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
-import { formatDateTime, toDateTimeLocal } from "../../utils/format.js";
+import { formatDateTime } from "../../utils/format.js";
+import { MeetingWizard } from "./MeetingWizard.jsx";
 
 function detailHref(role, id) {
   const base =
@@ -35,7 +35,7 @@ function liveHref(role, id) {
 
 function meetingPlace(meeting) {
   if (meeting.meeting_type === "ONLINE") {
-    return meeting.online_room_name || "Phòng Jitsi sẽ tạo khi bắt đầu";
+    return meeting.online_room_name || "Phòng online sẽ tạo khi bắt đầu";
   }
   if (meeting.meeting_type === "HYBRID") {
     return [meeting.room_name, meeting.online_room_name].filter(Boolean).join(" + ");
@@ -59,33 +59,22 @@ function canStartLive(role, meeting) {
   );
 }
 
-const initialMeetingForm = {
-  title: "",
-  description: "",
-  startTime: toDateTimeLocal(),
-  endTime: toDateTimeLocal(new Date(Date.now() + 2 * 60 * 60 * 1000)),
-  roomId: "",
-  meetingType: "HYBRID",
-  participantIds: [],
-  notes: ""
-};
-
 export function MeetingsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [meetings, setMeetings] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [users, setUsers] = useState([]);
-  const [form, setForm] = useState(initialMeetingForm);
   const [showForm, setShowForm] = useState(user.role === "ORGANIZER");
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [creating, setCreating] = useState(false);
   const [busyMeetingId, setBusyMeetingId] = useState(null);
 
   const participantUsers = useMemo(
     () => users.filter((item) => item.role === "PARTICIPANT" && item.status === "ACTIVE"),
     [users]
   );
-  const selectedParticipantCount = form.participantIds.length;
 
   async function load() {
     let path = "/meetings";
@@ -99,51 +88,29 @@ export function MeetingsPage() {
     }
     const [meetingRes, roomsRes, usersRes] = await Promise.all(requests);
     setMeetings(meetingRes.data.data || []);
-    if (roomsRes) {
-      const nextRooms = roomsRes.data.data || [];
-      setRooms(nextRooms);
-      setForm((current) => ({
-        ...current,
-        roomId: current.roomId || nextRooms[0]?.id || ""
-      }));
-    }
-    if (usersRes) {
-      const nextUsers = usersRes.data.data || [];
-      const nextParticipantIds = nextUsers
-        .filter((item) => item.role === "PARTICIPANT" && item.status === "ACTIVE")
-        .map((item) => item.id);
-      setUsers(nextUsers);
-      setForm((current) => ({
-        ...current,
-        participantIds:
-          current.participantIds.length > 0 ? current.participantIds : nextParticipantIds
-      }));
-    }
+    if (roomsRes) setRooms(roomsRes.data.data || []);
+    if (usersRes) setUsers(usersRes.data.data || []);
   }
 
   useEffect(() => {
     load().catch((err) => setError(err.response?.data?.message || "Không tải được cuộc họp"));
   }, [user.role]);
 
-  async function createMeeting(event) {
-    event.preventDefault();
+  async function createMeeting(payload) {
     setError("");
+    setMessage("");
+    setCreating(true);
     try {
-      const payload = {
-        ...form,
-        roomId: form.meetingType === "ONLINE" ? null : form.roomId,
-        participantIds: form.participantIds
-      };
       await api.post("/meetings", payload);
-      setForm({
-        ...initialMeetingForm,
-        roomId: rooms[0]?.id || "",
-        participantIds: participantUsers.map((item) => item.id)
-      });
+      setMessage(`Đã tạo cuộc họp "${payload.title}" và gửi lời mời tới ${payload.participants.length} người`);
       setShowForm(false);
       await load();
+      return true;
     } catch (err) {
       setError(err.response?.data?.message || "Không tạo được cuộc họp");
+      return false;
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -172,26 +139,6 @@ export function MeetingsPage() {
     }
   }
 
-  function toggleParticipant(userId) {
-    setForm((current) => ({
-      ...current,
-      participantIds: current.participantIds.includes(userId)
-        ? current.participantIds.filter((id) => id !== userId)
-        : [...current.participantIds, userId]
-    }));
-  }
-
-  function selectAllParticipants() {
-    setForm((current) => ({
-      ...current,
-      participantIds: participantUsers.map((item) => item.id)
-    }));
-  }
-
-  function clearParticipants() {
-    setForm((current) => ({ ...current, participantIds: [] }));
-  }
-
   return (
     <div className="page-stack">
       {user.role === "ORGANIZER" && (
@@ -207,126 +154,23 @@ export function MeetingsPage() {
             </button>
           </div>
           {showForm && (
-            <form className="form-grid four" onSubmit={createMeeting}>
-              <label className="wide">
-                Tên cuộc họp
-                <input
-                  value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  placeholder="Ví dụ: Họp triển khai kế hoạch tháng"
-                  required
-                />
-              </label>
-              <label>
-                Bắt đầu
-                <input
-                  type="datetime-local"
-                  value={form.startTime}
-                  onChange={(e) => setForm({ ...form, startTime: e.target.value })}
-                  required
-                />
-              </label>
-              <label>
-                Kết thúc
-                <input
-                  type="datetime-local"
-                  value={form.endTime}
-                  onChange={(e) => setForm({ ...form, endTime: e.target.value })}
-                  required
-                />
-              </label>
-              <label>
-                Loại họp
-                <select
-                  value={form.meetingType}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      meetingType: e.target.value,
-                      roomId: e.target.value === "ONLINE" ? "" : form.roomId || rooms[0]?.id || ""
-                    })
-                  }
-                >
-                  <option value="ONLINE">Online</option>
-                  <option value="HYBRID">Hybrid</option>
-                  <option value="OFFLINE">Offline</option>
-                </select>
-              </label>
-              <label>
-                Phòng vật lý
-                <select
-                  value={form.roomId}
-                  onChange={(e) => setForm({ ...form, roomId: e.target.value })}
-                  required={form.meetingType !== "ONLINE"}
-                  disabled={form.meetingType === "ONLINE"}
-                >
-                  <option value="">Không cần phòng</option>
-                  {rooms.map((room) => (
-                    <option key={room.id} value={room.id}>
-                      {room.name} ({room.capacity})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="wide">
-                Mô tả
-                <textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Mục tiêu, phạm vi, nội dung chính..."
-                />
-              </label>
-              <div className="wide participant-picker">
-                <div className="participant-picker-head">
-                  <div>
-                    <span className="eyebrow">Người tham dự</span>
-                    <strong>
-                      {selectedParticipantCount}/{participantUsers.length} participant được mời
-                    </strong>
-                  </div>
-                  <div className="row-actions">
-                    <button type="button" className="ghost-button" onClick={selectAllParticipants}>
-                      Chọn tất cả
-                    </button>
-                    <button type="button" className="ghost-button" onClick={clearParticipants}>
-                      Bỏ chọn
-                    </button>
-                  </div>
-                </div>
-                <div className="participant-check-grid">
-                  {participantUsers.map((item) => (
-                    <label key={item.id} className="participant-check">
-                      <input
-                        type="checkbox"
-                        checked={form.participantIds.includes(item.id)}
-                        onChange={() => toggleParticipant(item.id)}
-                      />
-                      <span>
-                        <strong>{item.full_name}</strong>
-                        <small>{item.email}</small>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <label className="wide">
-                Ghi chú nội bộ
-                <textarea
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                />
-              </label>
-              {error && <div className="alert error wide">{error}</div>}
-              <button className="primary-button">
-                <Plus size={16} />
-                Tạo cuộc họp
-              </button>
-            </form>
+            <>
+              {error && <div className="alert error">{error}</div>}
+              <MeetingWizard
+                rooms={rooms}
+                users={participantUsers}
+                onSubmit={createMeeting}
+                submitting={creating}
+              />
+            </>
           )}
         </section>
       )}
 
-      {error && user.role !== "ORGANIZER" && <div className="alert error">{error}</div>}
+      {message && <div className="alert success">{message}</div>}
+      {error && (!showForm || user.role !== "ORGANIZER") && (
+        <div className="alert error">{error}</div>
+      )}
 
       <section className="panel">
         <div className="section-heading">

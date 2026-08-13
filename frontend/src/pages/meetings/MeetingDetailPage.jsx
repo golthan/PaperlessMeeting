@@ -1,15 +1,23 @@
 import {
   Check,
+  ChevronDown,
+  ChevronUp,
   Download,
   FileText,
   ListChecks,
+  MonitorUp,
+  Mic,
+  Pencil,
   Plus,
   QrCode,
   Save,
   Send,
   Trash2,
+  Upload,
+  UserPlus,
   Video,
-  Vote
+  Vote,
+  X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -17,7 +25,12 @@ import { api } from "../../api/client.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
-import { asArray, formatDate, formatDateTime } from "../../utils/format.js";
+import { asArray, formatDate, formatDateTime, toDateTimeLocal } from "../../utils/format.js";
+
+const ROLE_LABELS = {
+  SECRETARY: "Thư ký",
+  MEMBER: "Thành viên"
+};
 
 const tabs = [
   ["overview", "Tổng quan"],
@@ -57,6 +70,13 @@ export function MeetingDetailPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [qr, setQr] = useState(null);
+  const [rooms, setRooms] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState(null);
+  const [newParticipant, setNewParticipant] = useState({ userId: "", roleInMeeting: "MEMBER" });
+  const [agendaEditId, setAgendaEditId] = useState(null);
+  const [agendaEditForm, setAgendaEditForm] = useState(null);
   const [voteResults, setVoteResults] = useState({});
   const [documentForm, setDocumentForm] = useState({ file: null, displayName: "", description: "" });
   const [agendaForm, setAgendaForm] = useState({
@@ -101,7 +121,15 @@ export function MeetingDetailPage() {
 
   useEffect(() => {
     load().catch((err) => setError(err.response?.data?.message || "Không tải được cuộc họp"));
-  }, [id]);
+    if (user.role === "ORGANIZER") {
+      Promise.all([api.get("/rooms"), api.get("/users", { params: { limit: 200 } })])
+        .then(([roomsRes, usersRes]) => {
+          setRooms(roomsRes.data.data || []);
+          setAllUsers(usersRes.data.data || []);
+        })
+        .catch(() => {});
+    }
+  }, [id, user.role]);
 
   const participants = asArray(meeting?.participants);
   const participantOptions = useMemo(
@@ -119,6 +147,132 @@ export function MeetingDetailPage() {
     } catch (err) {
       setError(err.response?.data?.message || "Thao tác thất bại");
     }
+  }
+
+  const meetingEditable = meeting && !["FINISHED", "CANCELLED"].includes(meeting.status);
+  const invitableUsers = allUsers.filter(
+    (item) =>
+      item.role === "PARTICIPANT" &&
+      item.status === "ACTIVE" &&
+      !participants.some((p) => p.user_id === item.id)
+  );
+
+  function openEdit() {
+    setEditForm({
+      title: meeting.title || "",
+      description: meeting.description || "",
+      notes: meeting.notes || "",
+      meetingType: meeting.meeting_type,
+      startTime: toDateTimeLocal(new Date(meeting.start_time)),
+      endTime: toDateTimeLocal(new Date(meeting.end_time)),
+      roomId: meeting.room_id || "",
+      status: meeting.status
+    });
+    setEditOpen(true);
+  }
+
+  async function saveEdit(event) {
+    event.preventDefault();
+    if (editForm.meetingType !== "ONLINE" && !editForm.roomId) {
+      setError("Cuộc họp tập trung / kết hợp cần chọn phòng họp vật lý");
+      return;
+    }
+    await run(
+      () =>
+        api.put(`/meetings/${id}`, {
+          title: editForm.title,
+          description: editForm.description || null,
+          notes: editForm.notes || null,
+          meetingType: editForm.meetingType,
+          startTime: editForm.startTime,
+          endTime: editForm.endTime,
+          roomId: editForm.meetingType === "ONLINE" ? null : editForm.roomId,
+          status: editForm.status
+        }),
+      "Đã lưu thay đổi cuộc họp"
+    );
+    setEditOpen(false);
+  }
+
+  async function addParticipant(event) {
+    event.preventDefault();
+    if (!newParticipant.userId) {
+      setError("Chọn người cần mời thêm");
+      return;
+    }
+    await run(
+      () =>
+        api.post(`/meetings/${id}/participants`, {
+          userIds: [newParticipant.userId],
+          roleInMeeting: newParticipant.roleInMeeting,
+          canSpeak: true,
+          canUploadDocument: true,
+          canShareScreen: false
+        }),
+      "Đã thêm người tham dự"
+    );
+    setNewParticipant({ userId: "", roleInMeeting: "MEMBER" });
+  }
+
+  async function updateParticipant(userId, patch) {
+    await run(
+      () => api.put(`/meetings/${id}/participants/${userId}`, patch),
+      "Đã cập nhật quyền người tham dự"
+    );
+  }
+
+  async function removeParticipant(userId) {
+    await run(
+      () => api.delete(`/meetings/${id}/participants/${userId}`),
+      "Đã xóa người tham dự"
+    );
+  }
+
+  const sortedAgenda = useMemo(() => {
+    const items = asArray(meeting?.agenda);
+    return [...items].sort(
+      (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.created_at?.localeCompare?.(b.created_at ?? "") || 0
+    );
+  }, [meeting?.agenda]);
+
+  async function moveAgenda(index, delta) {
+    const target = index + delta;
+    if (target < 0 || target >= sortedAgenda.length) return;
+    const next = [...sortedAgenda];
+    [next[index], next[target]] = [next[target], next[index]];
+    await run(
+      () =>
+        api.put(`/meetings/${id}/agenda/reorder`, {
+          items: next.map((item, sortOrder) => ({ id: item.id, sortOrder }))
+        }),
+      "Đã sắp xếp lại chương trình"
+    );
+  }
+
+  function openAgendaEdit(item) {
+    setAgendaEditId(item.id);
+    setAgendaEditForm({
+      title: item.title || "",
+      description: item.description || "",
+      presenterId: item.presenter_id || "",
+      durationMinutes: item.duration_minutes || 0
+    });
+  }
+
+  async function saveAgendaEdit(event) {
+    event.preventDefault();
+    await run(
+      () =>
+        api.put(`/agenda/${agendaEditId}`, {
+          title: agendaEditForm.title,
+          description: agendaEditForm.description || null,
+          presenterId: agendaEditForm.presenterId || null,
+          durationMinutes: Number(agendaEditForm.durationMinutes || 0)
+        }),
+      "Đã cập nhật nội dung chương trình"
+    );
+    setAgendaEditId(null);
+    setAgendaEditForm(null);
   }
 
   async function changeMeetingStatus(action) {
@@ -259,6 +413,12 @@ export function MeetingDetailPage() {
           )}
           {isOrganizer && (
             <>
+            {meetingEditable && (
+              <button className="secondary-button" onClick={() => (editOpen ? setEditOpen(false) : openEdit())}>
+                <Pencil size={16} />
+                {editOpen ? "Đóng chỉnh sửa" : "Chỉnh sửa"}
+              </button>
+            )}
             {["UPCOMING", "DRAFT"].includes(meeting.status) && (
               <button
                 className={hasOnlineRoom ? "primary-button" : "secondary-button"}
@@ -283,6 +443,124 @@ export function MeetingDetailPage() {
         </div>
       </section>
 
+      {isOrganizer && editOpen && editForm && (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Chỉnh sửa cuộc họp</span>
+              <h2>Cập nhật thông tin</h2>
+            </div>
+          </div>
+          <form className="form-grid four" onSubmit={saveEdit}>
+            <label className="wide">
+              Tên cuộc họp
+              <input
+                value={editForm.title}
+                onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                required
+                maxLength={255}
+              />
+            </label>
+            <label>
+              Bắt đầu
+              <input
+                type="datetime-local"
+                value={editForm.startTime}
+                onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value })}
+                required
+              />
+            </label>
+            <label>
+              Kết thúc
+              <input
+                type="datetime-local"
+                value={editForm.endTime}
+                onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value })}
+                required
+              />
+            </label>
+            <label>
+              Hình thức
+              <select
+                value={editForm.meetingType}
+                onChange={(e) =>
+                  setEditForm({
+                    ...editForm,
+                    meetingType: e.target.value,
+                    roomId:
+                      e.target.value === "ONLINE"
+                        ? ""
+                        : editForm.roomId || rooms[0]?.id || ""
+                  })
+                }
+              >
+                <option value="ONLINE">Trực tuyến</option>
+                <option value="HYBRID">Kết hợp</option>
+                <option value="OFFLINE">Tập trung</option>
+              </select>
+            </label>
+            <label>
+              Phòng họp vật lý
+              <select
+                value={editForm.roomId}
+                onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}
+                disabled={editForm.meetingType === "ONLINE"}
+              >
+                <option value="">-- Chọn phòng --</option>
+                {rooms.map((room) => (
+                  <option key={room.id} value={room.id} disabled={room.status !== "AVAILABLE"}>
+                    {room.name} · {room.capacity} chỗ
+                    {room.status !== "AVAILABLE" ? " (không khả dụng)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {["DRAFT", "UPCOMING"].includes(meeting.status) && (
+              <label>
+                Trạng thái
+                <select
+                  value={editForm.status}
+                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                >
+                  <option value="DRAFT">Bản nháp</option>
+                  <option value="UPCOMING">Đã lên lịch</option>
+                </select>
+              </label>
+            )}
+            <label className="wide">
+              Mục tiêu / nội dung chính
+              <textarea
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                rows={2}
+              />
+            </label>
+            <label className="wide">
+              Ghi chú nội bộ
+              <textarea
+                value={editForm.notes}
+                onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                rows={2}
+              />
+            </label>
+            <div className="row-actions start wide">
+              <button className="primary-button" type="submit">
+                <Save size={16} />
+                Lưu thay đổi
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setEditOpen(false)}
+              >
+                <X size={16} />
+                Hủy
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
       <nav className="tabbar">
         {tabs.map(([key, label]) => (
           <button key={key} className={activeTab === key ? "active" : ""} onClick={() => setActiveTab(key)}>
@@ -294,8 +572,40 @@ export function MeetingDetailPage() {
       {activeTab === "overview" && (
         <section className="panel">
           <div className="section-heading">
-            <h2>Người tham dự</h2>
+            <h2>Người tham dự ({participants.length})</h2>
           </div>
+          {isOrganizer && meetingEditable && (
+            <form className="inline-form" onSubmit={addParticipant}>
+              <select
+                value={newParticipant.userId}
+                onChange={(e) => setNewParticipant({ ...newParticipant, userId: e.target.value })}
+              >
+                <option value="">-- Mời thêm người tham dự --</option>
+                {invitableUsers.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.full_name} · {item.email}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={newParticipant.roleInMeeting}
+                onChange={(e) =>
+                  setNewParticipant({ ...newParticipant, roleInMeeting: e.target.value })
+                }
+              >
+                {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <span />
+              <button className="primary-button">
+                <UserPlus size={16} />
+                Mời
+              </button>
+            </form>
+          )}
           {participants.length === 0 ? (
             <EmptyState title="Chưa có người tham dự" />
           ) : (
@@ -304,24 +614,104 @@ export function MeetingDetailPage() {
                 <thead>
                   <tr>
                     <th>Họ tên</th>
-                    <th>Email</th>
                     <th>Phòng ban</th>
+                    <th>Vai trò</th>
+                    {isOrganizer && <th>Quyền trong họp</th>}
                     <th>Lời mời</th>
                     <th>Điểm danh</th>
+                    {isOrganizer && meetingEditable && <th></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {participants.map((item) => (
                     <tr key={item.user_id}>
-                      <td>{item.full_name}</td>
-                      <td>{item.email}</td>
+                      <td>
+                        <strong>{item.full_name}</strong>
+                        <span className="table-subtext">{item.email}</span>
+                      </td>
                       <td>{item.department_name || "-"}</td>
+                      <td>
+                        {isOrganizer && meetingEditable ? (
+                          <select
+                            className="table-select"
+                            value={item.role_in_meeting || "MEMBER"}
+                            onChange={(e) =>
+                              updateParticipant(item.user_id, { roleInMeeting: e.target.value })
+                            }
+                          >
+                            {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          ROLE_LABELS[item.role_in_meeting] || item.role_in_meeting
+                        )}
+                      </td>
+                      {isOrganizer && (
+                        <td>
+                          <div className="person-config">
+                            <label className="perm-toggle" title="Quyền phát biểu (mic/camera)">
+                              <input
+                                type="checkbox"
+                                checked={item.can_speak !== false}
+                                disabled={!meetingEditable}
+                                onChange={(e) =>
+                                  updateParticipant(item.user_id, { canSpeak: e.target.checked })
+                                }
+                              />
+                              <Mic size={13} />
+                              Phát biểu
+                            </label>
+                            <label className="perm-toggle" title="Quyền chia sẻ màn hình">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(item.can_share_screen)}
+                                disabled={!meetingEditable}
+                                onChange={(e) =>
+                                  updateParticipant(item.user_id, {
+                                    canShareScreen: e.target.checked
+                                  })
+                                }
+                              />
+                              <MonitorUp size={13} />
+                              Chia sẻ
+                            </label>
+                            <label className="perm-toggle" title="Quyền tải tài liệu lên">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(item.can_upload_document)}
+                                disabled={!meetingEditable}
+                                onChange={(e) =>
+                                  updateParticipant(item.user_id, {
+                                    canUploadDocument: e.target.checked
+                                  })
+                                }
+                              />
+                              <Upload size={13} />
+                              Tài liệu
+                            </label>
+                          </div>
+                        </td>
+                      )}
                       <td>
                         <StatusPill value={item.invitation_status} />
                       </td>
                       <td>
                         <StatusPill value={item.attendance_status || "ABSENT"} />
                       </td>
+                      {isOrganizer && meetingEditable && (
+                        <td className="row-actions">
+                          <button
+                            className="icon-button danger"
+                            title="Xóa khỏi cuộc họp"
+                            onClick={() => removeParticipant(item.user_id)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -449,23 +839,122 @@ export function MeetingDetailPage() {
               </button>
             </form>
           )}
-          {asArray(meeting.agenda).length === 0 ? (
+          {sortedAgenda.length === 0 ? (
             <EmptyState title="Chưa có agenda" />
           ) : (
             <ol className="agenda-list">
-              {meeting.agenda.map((item) => (
+              {sortedAgenda.map((item, index) => (
                 <li key={item.id}>
-                  <div>
-                    <strong>{item.title}</strong>
-                    <p>{item.description}</p>
-                    <span>
-                      {item.presenter_name || "Chưa chọn"} · {item.duration_minutes || 0} phút
-                    </span>
-                  </div>
-                  {isOrganizer && (
-                    <button className="icon-button danger" title="Xóa" onClick={() => run(() => api.delete(`/agenda/${item.id}`))}>
-                      <Trash2 size={16} />
-                    </button>
+                  {agendaEditId === item.id && agendaEditForm ? (
+                    <form className="agenda-edit-form" onSubmit={saveAgendaEdit}>
+                      <input
+                        value={agendaEditForm.title}
+                        onChange={(e) =>
+                          setAgendaEditForm({ ...agendaEditForm, title: e.target.value })
+                        }
+                        required
+                      />
+                      <div className="agenda-row-sub">
+                        <select
+                          value={agendaEditForm.presenterId}
+                          onChange={(e) =>
+                            setAgendaEditForm({ ...agendaEditForm, presenterId: e.target.value })
+                          }
+                        >
+                          <option value="">Người trình bày (tùy chọn)</option>
+                          {participantOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="duration-input">
+                          <input
+                            type="number"
+                            min="0"
+                            max="480"
+                            value={agendaEditForm.durationMinutes}
+                            onChange={(e) =>
+                              setAgendaEditForm({
+                                ...agendaEditForm,
+                                durationMinutes: e.target.value
+                              })
+                            }
+                          />
+                          <span>phút</span>
+                        </div>
+                      </div>
+                      <input
+                        value={agendaEditForm.description}
+                        onChange={(e) =>
+                          setAgendaEditForm({ ...agendaEditForm, description: e.target.value })
+                        }
+                        placeholder="Mô tả (tùy chọn)"
+                      />
+                      <div className="row-actions start">
+                        <button className="primary-button" type="submit">
+                          <Save size={15} />
+                          Lưu
+                        </button>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => {
+                            setAgendaEditId(null);
+                            setAgendaEditForm(null);
+                          }}
+                        >
+                          Hủy
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <div>
+                        <strong>
+                          {index + 1}. {item.title}
+                        </strong>
+                        <p>{item.description}</p>
+                        <span>
+                          {item.presenter_name || "Chưa chọn"} · {item.duration_minutes || 0} phút
+                        </span>{" "}
+                        <StatusPill value={item.status} />
+                      </div>
+                      {isOrganizer && (
+                        <div className="row-actions">
+                          <button
+                            className="icon-button"
+                            title="Chuyển lên"
+                            disabled={index === 0}
+                            onClick={() => moveAgenda(index, -1)}
+                          >
+                            <ChevronUp size={15} />
+                          </button>
+                          <button
+                            className="icon-button"
+                            title="Chuyển xuống"
+                            disabled={index === sortedAgenda.length - 1}
+                            onClick={() => moveAgenda(index, 1)}
+                          >
+                            <ChevronDown size={15} />
+                          </button>
+                          <button
+                            className="icon-button"
+                            title="Sửa"
+                            onClick={() => openAgendaEdit(item)}
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            className="icon-button danger"
+                            title="Xóa"
+                            onClick={() => run(() => api.delete(`/agenda/${item.id}`))}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </li>
               ))}

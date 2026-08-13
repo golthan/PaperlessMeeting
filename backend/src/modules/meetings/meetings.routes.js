@@ -6,11 +6,16 @@ import { authenticate } from "../../middlewares/auth.middleware.js";
 import { requireRole } from "../../middlewares/role.middleware.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { badRequest, forbidden, notFound } from "../../utils/httpError.js";
-import { buildJitsiRoomName, buildJitsiRoomUrl } from "../../utils/jitsi.js";
+import {
+  buildLiveRoomName,
+  buildLiveRoomUrl,
+  createLiveRoomToken
+} from "../../utils/livekit.js";
 import { getPagination, paged } from "../../utils/pagination.js";
 import {
   assertEnum,
   assertTimeRange,
+  MEETING_ROLES,
   MEETING_STATUSES,
   MEETING_TYPES,
   ONLINE_PROVIDERS,
@@ -223,6 +228,15 @@ meetingsRouter.get(
             isOrganizer: false
           };
 
+    const roomName =
+      meeting.online_room_name ||
+      (["ONLINE", "HYBRID"].includes(meeting.meeting_type)
+        ? buildLiveRoomName(meeting.id)
+        : null);
+    const livekitToken = roomName
+      ? await createLiveRoomToken({ roomName, user: req.user, permissions })
+      : null;
+
     res.json({
       data: {
         meetingId: meeting.id,
@@ -230,10 +244,10 @@ meetingsRouter.get(
         status: meeting.status,
         meetingType: meeting.meeting_type,
         provider: meeting.online_provider,
-        roomName: meeting.online_room_name,
-        roomUrl: buildJitsiRoomUrl(meeting.online_room_name) || meeting.online_room_url,
-        jitsiDomain: env.jitsiDomain,
-        externalApiUrl: env.jitsiExternalApiUrl,
+        roomName,
+        roomUrl: roomName ? buildLiveRoomUrl(meeting.id) : null,
+        livekitUrl: env.livekitWsUrl || null,
+        livekitToken,
         permissions
       }
     });
@@ -302,8 +316,10 @@ meetingsRouter.post(
       endTime,
       roomId,
       meetingType = "OFFLINE",
-      onlineProvider = "JITSI",
+      onlineProvider = "LIVEKIT",
       participantIds = [],
+      participants = [],
+      agenda = [],
       notes
     } = req.body;
     assertTimeRange(startTime, endTime);
@@ -312,6 +328,35 @@ meetingsRouter.post(
 
     if (["OFFLINE", "HYBRID"].includes(meetingType) && !roomId) {
       throw badRequest("Room is required for offline or hybrid meetings");
+    }
+
+    if (!Array.isArray(participants) || !Array.isArray(agenda)) {
+      throw badRequest("participants and agenda must be arrays");
+    }
+
+    const participantList =
+      participants.length > 0
+        ? participants
+        : participantIds.map((userId) => ({ userId }));
+
+    for (const person of participantList) {
+      if (!person.userId) throw badRequest("participants[].userId is required");
+      assertEnum(person.roleInMeeting, MEETING_ROLES, "role in meeting");
+    }
+    const secretaryCount = participantList.filter(
+      (person) => person.roleInMeeting === "SECRETARY"
+    ).length;
+    if (secretaryCount > 1) {
+      throw badRequest("A meeting can only have one secretary");
+    }
+
+    for (const item of agenda) {
+      if (!item.title || !String(item.title).trim()) {
+        throw badRequest("agenda[].title is required");
+      }
+      if (item.durationMinutes !== undefined && Number(item.durationMinutes) < 0) {
+        throw badRequest("agenda[].durationMinutes must be >= 0");
+      }
     }
 
     if (roomId) {
@@ -349,8 +394,8 @@ meetingsRouter.post(
 
       let created = rows[0];
       if (["ONLINE", "HYBRID"].includes(meetingType)) {
-        const roomName = buildJitsiRoomName(created.id);
-        const roomUrl = buildJitsiRoomUrl(roomName);
+        const roomName = buildLiveRoomName(created.id);
+        const roomUrl = buildLiveRoomUrl(created.id);
         const updated = await client.query(
           `UPDATE meetings
            SET online_room_name = $1, online_room_url = $2
@@ -361,19 +406,47 @@ meetingsRouter.post(
         created = updated.rows[0];
       }
 
-      for (const userId of participantIds) {
+      for (const person of participantList) {
+        const found = await client.query("SELECT id FROM users WHERE id = $1", [
+          person.userId
+        ]);
+        if (!found.rows[0]) throw notFound(`User ${person.userId} not found`);
+
         await client.query(
           `INSERT INTO meeting_participants
-            (meeting_id, user_id, can_upload_document, can_speak)
-           VALUES ($1, $2, true, true)
+            (meeting_id, user_id, role_in_meeting, can_share_screen, can_upload_document, can_speak)
+           VALUES ($1, $2, COALESCE($3, 'MEMBER'), $4, $5, $6)
            ON CONFLICT (meeting_id, user_id) DO NOTHING`,
-          [created.id, userId]
+          [
+            created.id,
+            person.userId,
+            person.roleInMeeting || null,
+            Boolean(person.canShareScreen),
+            person.canUploadDocument !== false,
+            person.canSpeak !== false
+          ]
         );
         await client.query(
           `INSERT INTO attendance (meeting_id, user_id)
            VALUES ($1, $2)
            ON CONFLICT (meeting_id, user_id) DO NOTHING`,
-          [created.id, userId]
+          [created.id, person.userId]
+        );
+      }
+
+      for (const [index, item] of agenda.entries()) {
+        await client.query(
+          `INSERT INTO agenda_items
+            (meeting_id, title, description, presenter_id, duration_minutes, sort_order)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            created.id,
+            String(item.title).trim(),
+            item.description || null,
+            item.presenterId || null,
+            Number(item.durationMinutes || 0),
+            index
+          ]
         );
       }
       return created;
@@ -426,7 +499,7 @@ meetingsRouter.put(
              ELSE online_room_name
            END,
            online_room_url = CASE
-             WHEN $3 IN ('ONLINE', 'HYBRID') AND online_room_url IS NULL THEN $10 || '/paperless-meeting-' || id::text
+             WHEN $3 IN ('ONLINE', 'HYBRID') AND online_room_url IS NULL THEN $10 || id::text
              WHEN $3 = 'OFFLINE' THEN NULL
              ELSE online_room_url
            END,
@@ -443,7 +516,7 @@ meetingsRouter.put(
         req.body.status || null,
         req.body.notes || null,
         req.params.id,
-        env.jitsiRoomUrlBase.replace(/\/$/, "")
+        `${env.clientOrigin.replace(/\/$/, "")}/join/`
       ]
     );
 
@@ -484,13 +557,13 @@ meetingsRouter.put(
              ELSE online_room_name
            END,
            online_room_url = CASE
-             WHEN meeting_type IN ('ONLINE', 'HYBRID') AND online_room_url IS NULL THEN $2 || '/paperless-meeting-' || id::text
+             WHEN meeting_type IN ('ONLINE', 'HYBRID') AND online_room_url IS NULL THEN $2 || id::text
              ELSE online_room_url
            END,
            updated_at = now()
        WHERE id = $1
        RETURNING *`,
-      [req.params.id, env.jitsiRoomUrlBase.replace(/\/$/, "")]
+      [req.params.id, `${env.clientOrigin.replace(/\/$/, "")}/join/`]
     );
     emitMeetingEvent(req.params.id, "meeting_status_updated", rows[0]);
     res.json({ data: rows[0] });

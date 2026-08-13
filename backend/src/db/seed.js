@@ -2,7 +2,6 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { pool } from "../config/db.js";
-import { buildJitsiRoomUrl } from "../utils/jitsi.js";
 import { hashPassword } from "../utils/password.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -109,7 +108,7 @@ async function run() {
     `INSERT INTO meetings
        (title, description, meeting_type, start_time, end_time, room_id, organizer_id,
         status, online_provider, online_room_name, online_room_url, notes)
-     VALUES ($1, $2, 'HYBRID', $3, $4, $5, $6, 'UPCOMING', 'JITSI', $7, $8, $9)
+     VALUES ($1, $2, 'HYBRID', $3, $4, $5, $6, 'UPCOMING', 'LIVEKIT', $7, $8, $9)
      RETURNING *`,
     [
       "Hop trien khai ke hoach thang",
@@ -119,7 +118,7 @@ async function run() {
       rooms.a101.id,
       users.organizer.id,
       "paperless-meeting-seed-monthly-plan",
-      buildJitsiRoomUrl("paperless-meeting-seed-monthly-plan"),
+      null,
       "Seed demo meeting"
     ]
   );
@@ -135,16 +134,16 @@ async function run() {
     `INSERT INTO meetings
        (title, description, meeting_type, start_time, end_time, room_id, organizer_id,
         status, online_provider, online_room_name, online_room_url, notes)
-     VALUES ($1, $2, 'ONLINE', $3, $4, NULL, $5, 'UPCOMING', 'JITSI', $6, $7, $8)
+     VALUES ($1, $2, 'ONLINE', $3, $4, NULL, $5, 'UPCOMING', 'LIVEKIT', $6, $7, $8)
      RETURNING *`,
     [
       "Hop truc tuyen ra soat tien do",
-      "Phong hop truc tuyen Jitsi cho nhom du an.",
+      "Phong hop truc tuyen LiveKit cho nhom du an.",
       onlineStart,
       onlineEnd,
       users.organizer.id,
       "paperless-meeting-seed-progress-review",
-      buildJitsiRoomUrl("paperless-meeting-seed-progress-review"),
+      null,
       "Online seed demo"
     ]
   );

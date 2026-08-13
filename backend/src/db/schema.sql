@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS meetings (
   room_id UUID REFERENCES rooms(id),
   organizer_id UUID NOT NULL REFERENCES users(id),
   status VARCHAR(30) NOT NULL DEFAULT 'UPCOMING',
-  online_provider VARCHAR(50) NOT NULL DEFAULT 'JITSI',
+  online_provider VARCHAR(50) NOT NULL DEFAULT 'LIVEKIT',
   online_room_name VARCHAR(255),
   online_room_url TEXT,
   notes TEXT,
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS meetings (
   cancelled_at TIMESTAMPTZ,
   deleted_at TIMESTAMPTZ,
   CONSTRAINT meetings_type_check CHECK (meeting_type IN ('ONLINE', 'OFFLINE', 'HYBRID')),
-  CONSTRAINT meetings_provider_check CHECK (online_provider IN ('JITSI', 'CUSTOM')),
+  CONSTRAINT meetings_provider_check CHECK (online_provider IN ('LIVEKIT', 'CUSTOM')),
   CONSTRAINT meetings_status_check CHECK (status IN ('DRAFT', 'UPCOMING', 'ONGOING', 'FINISHED', 'CANCELLED')),
   CONSTRAINT meetings_time_check CHECK (start_time < end_time)
 );
@@ -269,7 +269,7 @@ ALTER TABLE departments ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS meeting_type VARCHAR(30) NOT NULL DEFAULT 'OFFLINE';
-ALTER TABLE meetings ADD COLUMN IF NOT EXISTS online_provider VARCHAR(50) NOT NULL DEFAULT 'JITSI';
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS online_provider VARCHAR(50) NOT NULL DEFAULT 'LIVEKIT';
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS online_room_name VARCHAR(255);
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS online_room_url TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
@@ -296,8 +296,10 @@ DO $$
 BEGIN
   ALTER TABLE meetings DROP CONSTRAINT IF EXISTS meetings_type_check;
   ALTER TABLE meetings ADD CONSTRAINT meetings_type_check CHECK (meeting_type IN ('ONLINE', 'OFFLINE', 'HYBRID'));
+  UPDATE meetings SET online_provider = 'LIVEKIT' WHERE online_provider = 'JITSI';
+  UPDATE meetings SET online_room_url = NULL WHERE online_room_url LIKE '%jit.si%';
   ALTER TABLE meetings DROP CONSTRAINT IF EXISTS meetings_provider_check;
-  ALTER TABLE meetings ADD CONSTRAINT meetings_provider_check CHECK (online_provider IN ('JITSI', 'CUSTOM'));
+  ALTER TABLE meetings ADD CONSTRAINT meetings_provider_check CHECK (online_provider IN ('LIVEKIT', 'CUSTOM'));
   ALTER TABLE votes DROP CONSTRAINT IF EXISTS votes_status_check;
   ALTER TABLE votes ADD CONSTRAINT votes_status_check CHECK (status IN ('DRAFT', 'OPEN', 'CLOSED'));
   ALTER TABLE agenda_items DROP CONSTRAINT IF EXISTS agenda_status_check;

@@ -30,6 +30,23 @@ const navByRole = {
   ]
 };
 
+const roleLabel = {
+  ADMIN: "Quản trị viên",
+  ORGANIZER: "Người tổ chức",
+  PARTICIPANT: "Người tham dự"
+};
+
+function initials(user) {
+  const source = user?.full_name || user?.email || "?";
+  return source
+    .trim()
+    .split(/[\s@.]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join("");
+}
+
 function pageTitle(pathname) {
   if (pathname.includes("users")) return "Quản lý người dùng";
   if (pathname.includes("departments")) return "Quản lý phòng ban";
@@ -51,12 +68,16 @@ export function Layout() {
           <div className="brand-mark">PM</div>
           <div>
             <strong>Paperless Meeting</strong>
-            <span>{user?.role}</span>
+            <span>{roleLabel[user?.role] || user?.role}</span>
           </div>
         </div>
         <nav className="nav-list">
           {items.map(([label, href, Icon]) => (
-            <NavLink key={href} to={href} className="nav-item">
+            <NavLink
+              key={href}
+              to={href}
+              className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}
+            >
               <Icon size={18} />
               {label}
             </NavLink>
@@ -72,12 +93,19 @@ export function Layout() {
               <span>Paperless Meeting</span>
             </div>
             <h1>{pageTitle(location.pathname)}</h1>
-            <p>{user?.full_name || user?.email}</p>
+            <p>{roleLabel[user?.role] || user?.role}</p>
           </div>
-          <button className="ghost-button" onClick={logout}>
-            <LogOut size={16} />
-            Đăng xuất
-          </button>
+          <div className="topbar-user">
+            <div className="avatar">{initials(user)}</div>
+            <div className="topbar-identity">
+              <strong>{user?.full_name || user?.email}</strong>
+              <span>{user?.email}</span>
+            </div>
+            <button className="ghost-button" onClick={logout}>
+              <LogOut size={16} />
+              Đăng xuất
+            </button>
+          </div>
         </header>
         <Outlet />
       </main>

@@ -2,11 +2,6 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const jitsiDomain = process.env.JITSI_DOMAIN || "meet.jit.si";
-const jitsiScheme = process.env.JITSI_SCHEME || "https";
-const jitsiRoomUrlBase =
-  process.env.JITSI_ROOM_URL_BASE || `${jitsiScheme}://${jitsiDomain}`;
-
 export const env = {
   port: Number(process.env.PORT || 4000),
   databaseUrl:
@@ -17,8 +12,9 @@ export const env = {
   clientOrigin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
   uploadDir: process.env.UPLOAD_DIR || "uploads",
   maxFileSizeMb: Number(process.env.MAX_FILE_SIZE_MB || 20),
-  jitsiDomain,
-  jitsiExternalApiUrl:
-    process.env.JITSI_EXTERNAL_API_URL || `${jitsiRoomUrlBase}/external_api.js`,
-  jitsiRoomUrlBase
+  livekitApiKey: process.env.LIVEKIT_API_KEY || "paperless-key",
+  livekitApiSecret:
+    process.env.LIVEKIT_API_SECRET || "paperless_livekit_dev_secret_0123456789",
+  // De trong: client tu suy ra ws://<hostname dang mo trang>:7880
+  livekitWsUrl: process.env.LIVEKIT_WS_URL || ""
 };

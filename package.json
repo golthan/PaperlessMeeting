@@ -6,12 +6,17 @@
     "frontend",
     "mobile"
   ],
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
   "scripts": {
     "install:all": "npm install --workspaces",
     "dev:backend": "npm --workspace backend run dev",
     "dev:frontend": "npm --workspace frontend run dev",
     "dev:mobile": "npm --workspace mobile run start",
     "android": "npm --workspace mobile run android",
+    "android:emu": "powershell -ExecutionPolicy Bypass -File scripts/start-android.ps1",
     "seed": "npm --workspace backend run seed",
     "check": "npm --workspace backend run check && npm --workspace frontend run build && npm --workspace mobile run export:android"
   }

@@ -11,6 +11,19 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: paperless-meeting-livekit
+    # LIVEKIT_NODE_IP: dia chi IP ma client dung de bat media (mac dinh 127.0.0.1 cho web tren cung may).
+    # Khi test bang dien thoai/emulator, dat LIVEKIT_NODE_IP=<IP LAN cua may ban> (vi du 192.168.1.10).
+    command: --config /etc/livekit.yaml --node-ip ${LIVEKIT_NODE_IP:-127.0.0.1}
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "50000-50019:50000-50019/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+
 volumes:
   postgres_data:
 

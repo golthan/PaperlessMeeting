@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { io } from "socket.io-client";
+import { Room, Track } from "livekit-client";
+import {
+  GridLayout,
+  LiveKitRoom,
+  ParticipantTile,
+  RoomAudioRenderer,
+  useTracks
+} from "@livekit/components-react";
+import "@livekit/components-styles";
 import {
   Camera,
   Check,
@@ -24,23 +33,23 @@ function apiOrigin() {
   return base.replace(/\/api\/?$/, "");
 }
 
-function loadJitsiScript(src) {
-  if (window.JitsiMeetExternalAPI) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector("script[data-jitsi-api]");
-    if (existing) {
-      existing.addEventListener("load", resolve);
-      existing.addEventListener("error", reject);
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = src || "https://meet.jit.si/external_api.js";
-    script.async = true;
-    script.dataset.jitsiApi = "true";
-    script.onload = resolve;
-    script.onerror = reject;
-    document.body.appendChild(script);
-  });
+export function defaultLivekitUrl() {
+  return `ws://${window.location.hostname}:7880`;
+}
+
+export function VideoStage() {
+  const tracks = useTracks(
+    [
+      { source: Track.Source.Camera, withPlaceholder: true },
+      { source: Track.Source.ScreenShare, withPlaceholder: false }
+    ],
+    { onlySubscribed: false }
+  );
+  return (
+    <GridLayout tracks={tracks} style={{ height: "100%" }}>
+      <ParticipantTile />
+    </GridLayout>
+  );
 }
 
 function voteOptions(vote) {
@@ -66,8 +75,7 @@ export function LiveMeetingPage() {
   const [notice, setNotice] = useState("");
   const [voteResults, setVoteResults] = useState({});
   const [socketState, setSocketState] = useState("connecting");
-  const jitsiRef = useRef(null);
-  const jitsiApiRef = useRef(null);
+  const [lkRoom] = useState(() => new Room({ adaptiveStream: true, dynacast: true }));
   const socketRef = useRef(null);
 
   const isOrganizer = user.role === "ORGANIZER";
@@ -94,39 +102,13 @@ export function LiveMeetingPage() {
     loadData().catch((err) => setError(err.response?.data?.message || "Cannot load live room"));
   }, [id]);
 
-  useEffect(() => {
-    if (!config?.roomName || !jitsiRef.current) return undefined;
-    let disposed = false;
-    loadJitsiScript(config.externalApiUrl)
-      .then(() => {
-        if (disposed || !window.JitsiMeetExternalAPI) return;
-        jitsiApiRef.current?.dispose?.();
-        jitsiApiRef.current = new window.JitsiMeetExternalAPI(config.jitsiDomain, {
-          roomName: config.roomName,
-          parentNode: jitsiRef.current,
-          userInfo: {
-            displayName: user.full_name || user.email,
-            email: user.email
-          },
-          configOverwrite: {
-            startWithAudioMuted: true,
-            startWithVideoMuted: true,
-            disableDeepLinking: true
-          },
-          interfaceConfigOverwrite: {
-            SHOW_JITSI_WATERMARK: false,
-            SHOW_BRAND_WATERMARK: false
-          }
-        });
-      })
-      .catch(() => setError("Cannot load Jitsi external API"));
+  const livekitUrl = config?.livekitUrl || defaultLivekitUrl();
 
+  useEffect(() => {
     return () => {
-      disposed = true;
-      jitsiApiRef.current?.dispose?.();
-      jitsiApiRef.current = null;
+      lkRoom.disconnect();
     };
-  }, [config?.roomName, user.email, user.full_name]);
+  }, [lkRoom]);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -344,8 +326,25 @@ export function LiveMeetingPage() {
     setVoteResults((current) => ({ ...current, [voteId]: res.data.data.results }));
   }
 
-  function jitsiCommand(command) {
-    jitsiApiRef.current?.executeCommand(command);
+  function toggleMic() {
+    const participant = lkRoom.localParticipant;
+    participant
+      .setMicrophoneEnabled(!participant.isMicrophoneEnabled)
+      .catch(() => setError("Không bật được micro"));
+  }
+
+  function toggleCamera() {
+    const participant = lkRoom.localParticipant;
+    participant
+      .setCameraEnabled(!participant.isCameraEnabled)
+      .catch(() => setError("Không bật được camera"));
+  }
+
+  function toggleShareScreen() {
+    const participant = lkRoom.localParticipant;
+    participant
+      .setScreenShareEnabled(!participant.isScreenShareEnabled)
+      .catch(() => setError("Không chia sẻ được màn hình"));
   }
 
   if (!meeting || !config) {
@@ -378,8 +377,25 @@ export function LiveMeetingPage() {
       {notice && <div className="alert success">{notice}</div>}
 
       <section className="live-main">
-        <div className="jitsi-stage" ref={jitsiRef}>
-          {!config.roomName && <EmptyState title="This meeting has no online room" />}
+        <div className="live-stage">
+          {config.roomName && config.livekitToken ? (
+            <LiveKitRoom
+              room={lkRoom}
+              serverUrl={livekitUrl}
+              token={config.livekitToken}
+              connect
+              audio={false}
+              video={false}
+              data-lk-theme="default"
+              style={{ height: "100%" }}
+              onError={() => setError("Không kết nối được máy chủ video (LiveKit)")}
+            >
+              <VideoStage />
+              <RoomAudioRenderer />
+            </LiveKitRoom>
+          ) : (
+            <EmptyState title="This meeting has no online room" />
+          )}
         </div>
         <aside className="live-side">
           <div className="section-heading">
@@ -428,18 +444,18 @@ export function LiveMeetingPage() {
       </section>
 
       <section className="live-controls">
-        <button className="secondary-button" onClick={() => jitsiCommand("toggleAudio")}>
+        <button className="secondary-button" onClick={toggleMic}>
           <Mic size={16} />
           Mic
         </button>
-        <button className="secondary-button" onClick={() => jitsiCommand("toggleVideo")}>
+        <button className="secondary-button" onClick={toggleCamera}>
           <Camera size={16} />
           Camera
         </button>
         <button
           className="secondary-button"
           disabled={!config.permissions.canShareScreen}
-          onClick={() => jitsiCommand("toggleShareScreen")}
+          onClick={toggleShareScreen}
         >
           <MonitorUp size={16} />
           Share

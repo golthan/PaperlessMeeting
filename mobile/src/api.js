@@ -41,6 +41,15 @@ export async function apiRequest(path, options = {}) {
   return data;
 }
 
+export function liveJoinUrl(meetingId, livekitToken) {
+  const host = API_URL.replace(/^https?:\/\//, "").replace(/[:/].*$/, "");
+  const webBase = process.env.EXPO_PUBLIC_WEB_URL || `http://${host}:5173`;
+  const livekitUrl = process.env.EXPO_PUBLIC_LIVEKIT_URL || `ws://${host}:7880`;
+  return `${webBase.replace(/\/$/, "")}/join/${meetingId}#token=${encodeURIComponent(
+    livekitToken
+  )}&url=${encodeURIComponent(livekitUrl)}`;
+}
+
 export function documentDownloadUrl(documentId, token) {
   return `${API_URL}/documents/${documentId}/download?access_token=${encodeURIComponent(
     token

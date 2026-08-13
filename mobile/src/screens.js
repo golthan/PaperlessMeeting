@@ -3,6 +3,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Image,
   Linking,
   Pressable,
   RefreshControl,
@@ -12,7 +13,7 @@ import {
   TextInput,
   View
 } from "react-native";
-import { apiRequest, documentDownloadUrl } from "./api";
+import { apiRequest, documentDownloadUrl, liveJoinUrl } from "./api";
 import {
   CardRow,
   EmptyState,
@@ -27,7 +28,7 @@ import {
   StatusPill
 } from "./components";
 import { asArray, formatDate, formatDateTime } from "./format";
-import { colors, spacing } from "./theme";
+import { colors, radii, shadow, spacing } from "./theme";
 
 export function LoginScreen({ auth, booting }) {
   const [email, setEmail] = useState("participant1@example.com");
@@ -61,10 +62,15 @@ export function LoginScreen({ auth, booting }) {
 
   return (
     <ScrollView contentContainerStyle={styles.authScreen} keyboardShouldPersistTaps="handled">
-      <View style={styles.brandMark}>
-        <Text style={styles.brandMarkText}>PM</Text>
+      <View style={styles.brandLogoWrap}>
+        <Image
+          source={require("../assets/logo-hvktmm.png")}
+          style={styles.brandLogo}
+          resizeMode="contain"
+        />
       </View>
       <Text style={styles.brandTitle}>Paperless Meeting</Text>
+      <Text style={styles.brandAcademy}>Học viện Kỹ thuật Mật mã</Text>
       <Text style={styles.brandSubtitle}>Ứng dụng điện thoại cho người tham dự</Text>
 
       <Panel style={styles.authPanel}>
@@ -829,12 +835,12 @@ export function LiveMeetingScreen({ auth, meetingId }) {
   }
 
   async function openOnlineRoom() {
-    const url = liveConfig?.roomUrl;
-    if (!url) {
-      Alert.alert("Chưa có phòng online", "Cuộc họp này chưa có link Jitsi.");
+    const token = liveConfig?.livekitToken;
+    if (!token) {
+      Alert.alert("Chưa có phòng online", "Cuộc họp này chưa có phòng họp trực tuyến.");
       return;
     }
-    await Linking.openURL(url);
+    await Linking.openURL(liveJoinUrl(meetingId, token));
   }
 
   async function checkIn() {
@@ -967,9 +973,9 @@ export function LiveMeetingScreen({ auth, meetingId }) {
                 <View style={styles.stack}>
                   <PrimaryButton
                     icon="videocam-outline"
-                    title="Mở Jitsi"
+                    title="Mở phòng họp online"
                     onPress={openOnlineRoom}
-                    disabled={!liveConfig.roomUrl}
+                    disabled={!liveConfig.livekitToken}
                   />
                   <SecondaryButton
                     icon="checkmark-outline"
@@ -1157,35 +1163,48 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: spacing.lg
   },
-  brandMark: {
+  brandLogoWrap: {
     alignItems: "center",
     alignSelf: "center",
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    height: 58,
+    backgroundColor: "#ffffff",
+    borderRadius: radii.xl,
     justifyContent: "center",
     marginBottom: spacing.md,
-    width: 58
+    padding: spacing.sm,
+    ...shadow(3)
   },
-  brandMarkText: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "900"
+  brandLogo: {
+    height: 96,
+    width: 96
+  },
+  brandAcademy: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    marginTop: 2,
+    textAlign: "center",
+    textTransform: "uppercase"
   },
   brandTitle: {
-    color: colors.text,
+    color: colors.textStrong,
     fontSize: 28,
-    fontWeight: "900",
+    fontWeight: "800",
+    letterSpacing: -0.8,
     textAlign: "center"
   },
   brandSubtitle: {
     color: colors.muted,
-    marginBottom: spacing.lg,
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: spacing.xl,
     marginTop: 4,
     textAlign: "center"
   },
   authPanel: {
-    gap: spacing.md
+    gap: spacing.md,
+    padding: spacing.lg,
+    ...shadow(2)
   },
   quickLoginRow: {
     flexDirection: "row",
@@ -1211,18 +1230,19 @@ const styles = StyleSheet.create({
   },
   summaryRow: {
     alignItems: "center",
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceSunken,
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: radii.md,
     borderWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
-    padding: spacing.sm
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
   },
   summaryCount: {
-    color: colors.text,
+    color: colors.primaryDark,
     fontSize: 18,
-    fontWeight: "900"
+    fontWeight: "800"
   },
   cardActions: {
     alignItems: "flex-end",
@@ -1235,12 +1255,12 @@ const styles = StyleSheet.create({
   smallButton: {
     alignItems: "center",
     backgroundColor: colors.surfaceSoft,
-    borderColor: colors.border,
-    borderRadius: 6,
+    borderColor: colors.primarySoft,
+    borderRadius: radii.sm,
     borderWidth: 1,
-    height: 34,
+    height: 36,
     justifyContent: "center",
-    width: 34
+    width: 36
   },
   rowBetween: {
     alignItems: "flex-start",
@@ -1278,10 +1298,10 @@ const styles = StyleSheet.create({
   tabChip: {
     alignItems: "center",
     borderBottomColor: "transparent",
-    borderBottomWidth: 3,
+    borderBottomWidth: 2.5,
     flexDirection: "row",
     gap: 5,
-    minHeight: 44,
+    minHeight: 46,
     paddingHorizontal: spacing.md
   },
   tabChipActive: {
@@ -1289,16 +1309,19 @@ const styles = StyleSheet.create({
   },
   tabChipText: {
     color: colors.muted,
-    fontWeight: "800"
+    fontSize: 13.5,
+    fontWeight: "700"
   },
   tabChipTextActive: {
-    color: colors.primary
+    color: colors.primary,
+    fontWeight: "800"
   },
   meetingTitle: {
-    color: colors.text,
+    color: colors.textStrong,
     flex: 1,
-    fontSize: 20,
-    fontWeight: "900"
+    fontSize: 21,
+    fontWeight: "800",
+    letterSpacing: -0.5
   },
   participantRow: {
     alignItems: "center",
@@ -1308,14 +1331,17 @@ const styles = StyleSheet.create({
   avatar: {
     alignItems: "center",
     backgroundColor: colors.surfaceSoft,
-    borderRadius: 20,
+    borderColor: colors.primarySoft,
+    borderRadius: radii.full,
+    borderWidth: 1,
     height: 40,
     justifyContent: "center",
     width: 40
   },
   avatarText: {
     color: colors.primary,
-    fontWeight: "900"
+    fontSize: 13,
+    fontWeight: "800"
   },
   flex: {
     flex: 1
@@ -1326,17 +1352,20 @@ const styles = StyleSheet.create({
   },
   agendaIndex: {
     backgroundColor: colors.surfaceSoft,
-    borderRadius: 999,
+    borderRadius: radii.full,
     color: colors.primary,
-    fontWeight: "900",
+    fontSize: 13,
+    fontWeight: "800",
     height: 28,
     lineHeight: 28,
+    overflow: "hidden",
     textAlign: "center",
     width: 28
   },
   voteBox: {
+    backgroundColor: colors.surfaceSunken,
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: radii.md,
     borderWidth: 1,
     gap: spacing.sm,
     padding: spacing.md
@@ -1348,16 +1377,16 @@ const styles = StyleSheet.create({
   minutesText: {
     color: colors.text,
     fontSize: 15,
-    lineHeight: 23
+    lineHeight: 24
   },
   permissionGrid: {
     gap: spacing.sm
   },
   permissionItem: {
     alignItems: "center",
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSunken,
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: radii.md,
     borderWidth: 1,
     flexDirection: "row",
     gap: spacing.sm,
@@ -1366,45 +1395,57 @@ const styles = StyleSheet.create({
   permissionText: {
     color: colors.text,
     flex: 1,
-    fontWeight: "800"
+    fontSize: 14,
+    fontWeight: "700"
   },
   messageBubble: {
     alignSelf: "flex-start",
-    backgroundColor: colors.surfaceSoft,
-    borderRadius: 8,
-    maxWidth: "92%",
-    padding: spacing.sm
+    backgroundColor: colors.surfaceSunken,
+    borderBottomLeftRadius: radii.sm,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    maxWidth: "88%",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
   },
   messageBubbleMine: {
     alignSelf: "flex-end",
-    backgroundColor: "#e2f3ee"
+    backgroundColor: colors.surfaceSoft,
+    borderBottomLeftRadius: radii.lg,
+    borderBottomRightRadius: radii.sm,
+    borderColor: colors.primarySoft
   },
   messageAuthor: {
     color: colors.primary,
-    fontSize: 12,
-    fontWeight: "900",
-    marginBottom: 3
+    fontSize: 11.5,
+    fontWeight: "800",
+    marginBottom: 2
   },
   messageText: {
     color: colors.text,
-    lineHeight: 20
+    fontSize: 14.5,
+    lineHeight: 21
   },
   textArea: {
     backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.md,
     borderWidth: 1,
     color: colors.text,
+    fontSize: 15,
+    lineHeight: 22,
     minHeight: 150,
     padding: spacing.md,
     textAlignVertical: "top"
   },
   textAreaSmall: {
     backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.md,
     borderWidth: 1,
     color: colors.text,
+    fontSize: 15,
     minHeight: 74,
     padding: spacing.md,
     textAlignVertical: "top"

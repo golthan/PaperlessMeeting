@@ -10,6 +10,7 @@ import { UsersPage } from "./pages/admin/UsersPage.jsx";
 import { MeetingsPage } from "./pages/meetings/MeetingsPage.jsx";
 import { MeetingDetailPage } from "./pages/meetings/MeetingDetailPage.jsx";
 import { LiveMeetingPage } from "./pages/meetings/LiveMeetingPage.jsx";
+import { JoinRoomPage } from "./pages/meetings/JoinRoomPage.jsx";
 import { MyTasksPage } from "./pages/participant/MyTasksPage.jsx";
 
 function ProtectedRoute({ roles, children }) {
@@ -34,6 +35,7 @@ export function App() {
       <Route path="/" element={<RootRedirect />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/join/:id" element={<JoinRoomPage />} />
 
       <Route
         element={
