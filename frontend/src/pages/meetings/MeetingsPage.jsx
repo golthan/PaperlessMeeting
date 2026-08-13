@@ -13,7 +13,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../api/client.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
+import { PageHeader } from "../../components/PageHeader.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
+import { useToast } from "../../components/ToastProvider.jsx";
+import { roleHome } from "../../auth/AuthContext.jsx";
 import { formatDateTime } from "../../utils/format.js";
 import { MeetingWizard } from "./MeetingWizard.jsx";
 
@@ -62,6 +65,7 @@ function canStartLive(role, meeting) {
 export function MeetingsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
   const [meetings, setMeetings] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [users, setUsers] = useState([]);
@@ -95,6 +99,14 @@ export function MeetingsPage() {
   useEffect(() => {
     load().catch((err) => setError(err.response?.data?.message || "Không tải được cuộc họp"));
   }, [user.role]);
+
+  useEffect(() => {
+    if (message) toast.success(message);
+  }, [message, toast]);
+
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error, toast]);
 
   async function createMeeting(payload) {
     setError("");
@@ -141,6 +153,22 @@ export function MeetingsPage() {
 
   return (
     <div className="page-stack">
+      <PageHeader
+        eyebrow={user.role === "PARTICIPANT" ? "Lời mời của tôi" : "Meeting hub"}
+        title={user.role === "PARTICIPANT" ? "Cuộc họp được mời" : "Quản lý cuộc họp"}
+        subtitle={`${meetings.length} cuộc họp trong danh sách`}
+        backTo={roleHome(user.role)}
+        backLabel="Về Dashboard"
+        actions={
+          user.role === "ORGANIZER" && (
+            <button className="primary-button" onClick={() => setShowForm(!showForm)}>
+              <CalendarPlus size={16} />
+              {showForm ? "Thu gọn form" : "Tạo cuộc họp"}
+            </button>
+          )
+        }
+      />
+
       {user.role === "ORGANIZER" && (
         <section className="panel create-meeting-panel">
           <div className="section-heading row">

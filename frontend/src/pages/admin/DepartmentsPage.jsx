@@ -2,6 +2,8 @@ import { Edit, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../api/client.js";
 import { EmptyState } from "../../components/EmptyState.jsx";
+import { PageHeader } from "../../components/PageHeader.jsx";
+import { useToast } from "../../components/ToastProvider.jsx";
 
 const emptyForm = { name: "", description: "" };
 
@@ -10,6 +12,7 @@ export function DepartmentsPage() {
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
+  const toast = useToast();
 
   async function load() {
     const res = await api.get("/departments");
@@ -20,15 +23,21 @@ export function DepartmentsPage() {
     load().catch((err) => setError(err.response?.data?.message || "Không tải được phòng ban"));
   }, []);
 
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error, toast]);
+
   async function submit(event) {
     event.preventDefault();
     setError("");
     try {
       if (editing) await api.put(`/departments/${editing}`, form);
       else await api.post("/departments", form);
+      const name = form.name;
       setForm(emptyForm);
       setEditing(null);
       await load();
+      toast.success(editing ? "Đã cập nhật phòng ban" : "Đã thêm phòng ban", name);
     } catch (err) {
       setError(err.response?.data?.message || "Không lưu được phòng ban");
     }
@@ -39,13 +48,23 @@ export function DepartmentsPage() {
     try {
       await api.delete(`/departments/${id}`);
       await load();
+      toast.success("Đã xoá phòng ban");
     } catch (err) {
       setError(err.response?.data?.message || "Không xóa được phòng ban");
     }
   }
 
   return (
-    <div className="split-page">
+    <div className="page-stack">
+      <PageHeader
+        eyebrow="Quản trị hệ thống"
+        title="Quản lý phòng ban"
+        subtitle={`${items.length} phòng ban đang hoạt động`}
+        backTo="/admin/dashboard"
+        backLabel="Về Dashboard"
+      />
+
+      <div className="split-page">
       <section className="panel">
         <div className="section-heading">
           <h2>{editing ? "Cập nhật phòng ban" : "Thêm phòng ban"}</h2>
@@ -117,7 +136,8 @@ export function DepartmentsPage() {
             </table>
           </div>
         )}
-      </section>
+        </section>
+      </div>
     </div>
   );
 }

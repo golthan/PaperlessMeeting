@@ -13,6 +13,7 @@ async function run() {
 
   await pool.query(`
     TRUNCATE
+      notifications,
       meeting_sessions,
       personal_notes,
       meeting_notes,
@@ -214,6 +215,20 @@ async function run() {
        ($1, $2, 'Chao moi nguoi, day la phong hop live demo.', 'TEXT'),
        ($1, $3, 'Participant da nhan duoc lich hop.', 'TEXT')`,
     [meeting.id, users.organizer.id, users.participant1.id]
+  );
+
+  await pool.query(
+    `INSERT INTO notifications (user_id, actor_id, meeting_id, type, severity, title, message, metadata)
+     VALUES
+       ($2, $3, $1, 'MEETING_INVITE', 'INFO', 'Ban duoc moi hop: Hop giao ban tuan',
+        'Meeting Organizer moi ban tham du. Vao chi tiet cuoc hop de xac nhan.', '{}'::jsonb),
+       ($2, $3, $1, 'TASK_ASSIGNED', 'INFO', 'Ban duoc giao nhiem vu moi',
+        'Chuan bi bao cao tien do - han 7 ngay toi.', '{"target":"TASKS"}'::jsonb),
+       ($4, $3, $1, 'MEETING_INVITE', 'INFO', 'Ban duoc moi hop: Hop giao ban tuan',
+        'Meeting Organizer moi ban tham du. Vao chi tiet cuoc hop de xac nhan.', '{}'::jsonb),
+       ($3, $2, $1, 'INVITATION_RESPONSE', 'SUCCESS', 'Co nguoi xac nhan tham du',
+        'Participant One se tham du cuoc hop Hop giao ban tuan.', '{}'::jsonb)`,
+    [meeting.id, users.participant1.id, users.organizer.id, users.participant2.id]
   );
 
   console.log("Database seeded successfully.");

@@ -19,6 +19,7 @@ import {
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
 import { emitMeetingEvent } from "../../config/socket.js";
+import { NOTIFICATION_TYPES, notifyUsers } from "../notifications/notifications.service.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -117,6 +118,23 @@ meetingDocumentsRouter.post(
       ]
     );
 
+    if (status === "PENDING") {
+      const meeting = await pool.query(
+        "SELECT organizer_id, title FROM meetings WHERE id = $1",
+        [req.params.meetingId]
+      );
+      await notifyUsers([meeting.rows[0]?.organizer_id], {
+        type: NOTIFICATION_TYPES.DOCUMENT_UPLOADED,
+        severity: "WARNING",
+        meetingId: req.params.meetingId,
+        actorId: req.user.id,
+        title: "Tài liệu chờ duyệt",
+        message: `${req.user.full_name} vừa tải lên "${rows[0].display_name}" cho cuộc họp "${meeting.rows[0]?.title}".`,
+        metadata: { documentId: rows[0].id },
+        excludeUserId: req.user.id
+      });
+    }
+
     res.status(201).json({ data: rows[0] });
   })
 );
@@ -186,6 +204,18 @@ documentsRouter.put(
        RETURNING *`,
       [req.params.id]
     );
+
+    await notifyUsers([document.uploaded_by], {
+      type: NOTIFICATION_TYPES.DOCUMENT_REVIEWED,
+      severity: "SUCCESS",
+      meetingId: document.meeting_id,
+      actorId: req.user.id,
+      title: "Tài liệu được duyệt",
+      message: `"${rows[0].display_name}" đã được duyệt và hiển thị cho cả cuộc họp.`,
+      metadata: { documentId: rows[0].id },
+      excludeUserId: req.user.id
+    });
+
     res.json({ data: rows[0] });
   })
 );
@@ -202,6 +232,18 @@ documentsRouter.put(
        RETURNING *`,
       [req.params.id]
     );
+
+    await notifyUsers([document.uploaded_by], {
+      type: NOTIFICATION_TYPES.DOCUMENT_REVIEWED,
+      severity: "DANGER",
+      meetingId: document.meeting_id,
+      actorId: req.user.id,
+      title: "Tài liệu bị từ chối",
+      message: `"${rows[0].display_name}" không được duyệt. Vui lòng kiểm tra và tải lên bản khác.`,
+      metadata: { documentId: rows[0].id },
+      excludeUserId: req.user.id
+    });
+
     res.json({ data: rows[0] });
   })
 );

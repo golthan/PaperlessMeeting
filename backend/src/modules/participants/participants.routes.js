@@ -4,12 +4,14 @@ import { authenticate } from "../../middlewares/auth.middleware.js";
 import { requireRole } from "../../middlewares/role.middleware.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { badRequest, notFound } from "../../utils/httpError.js";
+import { formatMeetingTime } from "../../utils/datetime.js";
 import { assertEnum, INVITATION_STATUSES } from "../../utils/validators.js";
 import {
   assertMeetingAccess,
   assertMeetingOrganizer,
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
+import { NOTIFICATION_TYPES, notifyUsers } from "../notifications/notifications.service.js";
 
 export const participantsRouter = express.Router({ mergeParams: true });
 export const invitationRouter = express.Router({ mergeParams: true });
@@ -18,7 +20,7 @@ participantsRouter.use(authenticate);
 invitationRouter.use(authenticate);
 
 async function updateMyInvitation(user, meetingId, status) {
-  await assertParticipantAccess(user, meetingId);
+  const meeting = await assertParticipantAccess(user, meetingId);
   const { rows } = await pool.query(
     `UPDATE meeting_participants
      SET invitation_status = $1, updated_at = now()
@@ -26,6 +28,20 @@ async function updateMyInvitation(user, meetingId, status) {
      RETURNING *`,
     [status, meetingId, user.id]
   );
+
+  await notifyUsers([meeting.organizer_id], {
+    type: NOTIFICATION_TYPES.INVITATION_RESPONSE,
+    severity: status === "ACCEPTED" ? "SUCCESS" : "WARNING",
+    meetingId,
+    actorId: user.id,
+    title: status === "ACCEPTED" ? "Có người xác nhận tham dự" : "Có người từ chối tham dự",
+    message: `${user.full_name} ${
+      status === "ACCEPTED" ? "sẽ tham dự" : "không tham dự"
+    } cuộc họp "${meeting.title}".`,
+    metadata: { invitationStatus: status },
+    excludeUserId: user.id
+  });
+
   return rows[0];
 }
 
@@ -93,6 +109,21 @@ participantsRouter.post(
       if (rows[0]) inserted.push(rows[0]);
     }
 
+    await notifyUsers(
+      inserted.map((row) => row.user_id),
+      {
+        type: NOTIFICATION_TYPES.MEETING_INVITE,
+        severity: "INFO",
+        meetingId: meeting.id,
+        actorId: req.user.id,
+        title: `Bạn được mời họp: ${meeting.title}`,
+        message: `${req.user.full_name} vừa thêm bạn vào cuộc họp lúc ${formatMeetingTime(
+          meeting.start_time
+        )}.`,
+        excludeUserId: req.user.id
+      }
+    );
+
     res.status(201).json({ data: inserted });
   })
 );
@@ -111,6 +142,17 @@ participantsRouter.delete(
       [req.params.meetingId, req.params.userId]
     );
     if (!rowCount) throw notFound("Participant not found");
+
+    await notifyUsers([req.params.userId], {
+      type: NOTIFICATION_TYPES.PARTICIPANT_REMOVED,
+      severity: "WARNING",
+      meetingId: meeting.id,
+      actorId: req.user.id,
+      title: `Bạn không còn trong cuộc họp: ${meeting.title}`,
+      message: `${req.user.full_name} đã gỡ bạn khỏi danh sách tham dự.`,
+      excludeUserId: req.user.id
+    });
+
     res.status(204).send();
   })
 );

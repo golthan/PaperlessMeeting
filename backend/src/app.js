@@ -13,6 +13,7 @@ import {
   meetingDocumentsRouter
 } from "./modules/documents/documents.routes.js";
 import { meetingsRouter } from "./modules/meetings/meetings.routes.js";
+import { notificationsRouter } from "./modules/notifications/notifications.routes.js";
 import { meetingMinutesRouter, minutesRouter } from "./modules/minutes/minutes.routes.js";
 import { personalNotesRouter, publicNotesRouter } from "./modules/notes/notes.routes.js";
 import {
@@ -59,6 +60,7 @@ app.use("/api/minutes", minutesRouter);
 app.use("/api/meetings/:meetingId/tasks", meetingTasksRouter);
 app.use("/api/tasks", tasksRouter);
 app.use("/api/meetings", meetingsRouter);
+app.use("/api/notifications", notificationsRouter);
 app.use("/api/dashboard", dashboardRouter);
 
 app.use(notFoundHandler);

@@ -2,7 +2,9 @@ import { Lock, Plus, Save, Unlock } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client.js";
 import { EmptyState } from "../../components/EmptyState.jsx";
+import { PageHeader } from "../../components/PageHeader.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
+import { useToast } from "../../components/ToastProvider.jsx";
 
 const emptyForm = {
   fullName: "",
@@ -19,6 +21,7 @@ export function UsersPage() {
   const [form, setForm] = useState(emptyForm);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  const toast = useToast();
 
   async function load() {
     const [users, deps] = await Promise.all([
@@ -32,6 +35,10 @@ export function UsersPage() {
   useEffect(() => {
     load().catch((err) => setError(err.response?.data?.message || "Không tải được người dùng"));
   }, []);
+
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error, toast]);
 
   const departmentOptions = useMemo(
     () => departments.map((department) => ({ value: department.id, label: department.name })),
@@ -48,6 +55,7 @@ export function UsersPage() {
       });
       setForm(emptyForm);
       await load();
+      toast.success("Đã thêm người dùng", form.email);
     } catch (err) {
       setError(err.response?.data?.message || "Không tạo được người dùng");
     }
@@ -74,6 +82,10 @@ export function UsersPage() {
     try {
       await api.put(`/users/${item.id}/${item.status === "LOCKED" ? "unlock" : "lock"}`);
       await load();
+      toast.success(
+        item.status === "LOCKED" ? "Đã mở khoá tài khoản" : "Đã khoá tài khoản",
+        item.email
+      );
     } catch (err) {
       setError(err.response?.data?.message || "Không cập nhật trạng thái");
     }
@@ -81,6 +93,14 @@ export function UsersPage() {
 
   return (
     <div className="page-stack">
+      <PageHeader
+        eyebrow="Quản trị hệ thống"
+        title="Quản lý người dùng"
+        subtitle={`${items.length} tài khoản trong hệ thống`}
+        backTo="/admin/dashboard"
+        backLabel="Về Dashboard"
+      />
+
       <section className="panel">
         <div className="section-heading">
           <h2>Thêm người dùng</h2>

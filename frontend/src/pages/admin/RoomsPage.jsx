@@ -2,7 +2,9 @@ import { Edit, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../api/client.js";
 import { EmptyState } from "../../components/EmptyState.jsx";
+import { PageHeader } from "../../components/PageHeader.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
+import { useToast } from "../../components/ToastProvider.jsx";
 
 const emptyForm = {
   name: "",
@@ -17,6 +19,7 @@ export function RoomsPage() {
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
+  const toast = useToast();
 
   async function load() {
     const res = await api.get("/rooms");
@@ -27,15 +30,21 @@ export function RoomsPage() {
     load().catch((err) => setError(err.response?.data?.message || "Không tải được phòng họp"));
   }, []);
 
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error, toast]);
+
   async function submit(event) {
     event.preventDefault();
     setError("");
     try {
       if (editing) await api.put(`/rooms/${editing}`, form);
       else await api.post("/rooms", form);
+      const name = form.name;
       setForm(emptyForm);
       setEditing(null);
       await load();
+      toast.success(editing ? "Đã cập nhật phòng họp" : "Đã thêm phòng họp", name);
     } catch (err) {
       setError(err.response?.data?.message || "Không lưu được phòng họp");
     }
@@ -46,13 +55,23 @@ export function RoomsPage() {
     try {
       await api.delete(`/rooms/${id}`);
       await load();
+      toast.success("Đã xoá phòng họp");
     } catch (err) {
       setError(err.response?.data?.message || "Không xóa được phòng họp");
     }
   }
 
   return (
-    <div className="split-page">
+    <div className="page-stack">
+      <PageHeader
+        eyebrow="Quản trị hệ thống"
+        title="Quản lý phòng họp"
+        subtitle={`${items.length} phòng trong danh mục`}
+        backTo="/admin/dashboard"
+        backLabel="Về Dashboard"
+      />
+
+      <div className="split-page">
       <section className="panel">
         <div className="section-heading">
           <h2>{editing ? "Cập nhật phòng họp" : "Thêm phòng họp"}</h2>
@@ -161,7 +180,8 @@ export function RoomsPage() {
             </table>
           </div>
         )}
-      </section>
+        </section>
+      </div>
     </div>
   );
 }

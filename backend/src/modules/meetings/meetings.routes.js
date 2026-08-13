@@ -11,6 +11,12 @@ import {
   buildLiveRoomUrl,
   createLiveRoomToken
 } from "../../utils/livekit.js";
+import {
+  NOTIFICATION_TYPES,
+  notifyMeetingAudience,
+  notifyUsers
+} from "../notifications/notifications.service.js";
+import { formatMeetingTime, isSameMinute } from "../../utils/datetime.js";
 import { getPagination, paged } from "../../utils/pagination.js";
 import {
   assertEnum,
@@ -452,6 +458,22 @@ meetingsRouter.post(
       return created;
     });
 
+    await notifyUsers(
+      participantList.map((person) => person.userId),
+      {
+        type: NOTIFICATION_TYPES.MEETING_INVITE,
+        severity: "INFO",
+        meetingId: meeting.id,
+        actorId: req.user.id,
+        title: `Bạn được mời họp: ${meeting.title}`,
+        message: `${req.user.full_name} mời bạn tham dự lúc ${formatMeetingTime(
+          meeting.start_time
+        )}. Vào chi tiết cuộc họp để xác nhận tham dự.`,
+        metadata: { startTime: meeting.start_time, meetingType: meeting.meeting_type },
+        excludeUserId: req.user.id
+      }
+    );
+
     res.status(201).json({ data: meeting });
   })
 );
@@ -520,7 +542,41 @@ meetingsRouter.put(
       ]
     );
 
-    res.json({ data: rows[0] });
+    const updated = rows[0];
+    const changes = [];
+    if (!isSameMinute(meeting.start_time, updated.start_time)) {
+      changes.push(`giờ bắt đầu → ${formatMeetingTime(updated.start_time)}`);
+    }
+    if (!isSameMinute(meeting.end_time, updated.end_time)) {
+      changes.push(`giờ kết thúc → ${formatMeetingTime(updated.end_time)}`);
+    }
+    if (meeting.room_id !== updated.room_id) {
+      const room = updated.room_id
+        ? await pool.query("SELECT name FROM rooms WHERE id = $1", [updated.room_id])
+        : null;
+      changes.push(`phòng họp → ${room?.rows[0]?.name || "họp trực tuyến"}`);
+    }
+    if (meeting.meeting_type !== updated.meeting_type) {
+      changes.push(`hình thức → ${updated.meeting_type}`);
+    }
+    if (meeting.title !== updated.title) {
+      changes.push(`tên cuộc họp → ${updated.title}`);
+    }
+
+    if (changes.length > 0) {
+      emitMeetingEvent(req.params.id, "meeting_status_updated", updated);
+      await notifyMeetingAudience(req.params.id, {
+        type: NOTIFICATION_TYPES.MEETING_UPDATED,
+        severity: "WARNING",
+        actorId: req.user.id,
+        title: `Lịch họp thay đổi: ${updated.title}`,
+        message: `${req.user.full_name} đã cập nhật ${changes.join(", ")}.`,
+        metadata: { changes },
+        excludeUserId: req.user.id
+      });
+    }
+
+    res.json({ data: updated });
   })
 );
 
@@ -536,6 +592,16 @@ meetingsRouter.put(
       [req.params.id]
     );
     emitMeetingEvent(req.params.id, "meeting_status_updated", rows[0]);
+    await notifyMeetingAudience(req.params.id, {
+      type: NOTIFICATION_TYPES.MEETING_CANCELLED,
+      severity: "DANGER",
+      actorId: req.user.id,
+      title: `Cuộc họp bị huỷ: ${rows[0].title}`,
+      message: `${req.user.full_name} đã huỷ cuộc họp dự kiến lúc ${formatMeetingTime(
+        rows[0].start_time
+      )}.`,
+      excludeUserId: req.user.id
+    });
     res.json({ data: rows[0] });
   })
 );
@@ -566,6 +632,14 @@ meetingsRouter.put(
       [req.params.id, `${env.clientOrigin.replace(/\/$/, "")}/join/`]
     );
     emitMeetingEvent(req.params.id, "meeting_status_updated", rows[0]);
+    await notifyMeetingAudience(req.params.id, {
+      type: NOTIFICATION_TYPES.MEETING_STARTED,
+      severity: "SUCCESS",
+      actorId: req.user.id,
+      title: `Cuộc họp đã bắt đầu: ${rows[0].title}`,
+      message: "Phòng họp đã mở, bạn có thể vào phòng ngay bây giờ.",
+      excludeUserId: req.user.id
+    });
     res.json({ data: rows[0] });
   })
 );
@@ -586,6 +660,14 @@ meetingsRouter.put(
       [req.params.id]
     );
     emitMeetingEvent(req.params.id, "meeting_status_updated", rows[0]);
+    await notifyMeetingAudience(req.params.id, {
+      type: NOTIFICATION_TYPES.MEETING_FINISHED,
+      severity: "INFO",
+      actorId: req.user.id,
+      title: `Cuộc họp đã kết thúc: ${rows[0].title}`,
+      message: "Bạn có thể xem lại biên bản, tài liệu và nhiệm vụ được giao trong hồ sơ cuộc họp.",
+      excludeUserId: req.user.id
+    });
     res.json({ data: rows[0] });
   })
 );
@@ -598,6 +680,15 @@ meetingsRouter.delete(
     if (meeting.status === "FINISHED") {
       throw badRequest("Cannot delete a finished meeting");
     }
+
+    await notifyMeetingAudience(req.params.id, {
+      type: NOTIFICATION_TYPES.MEETING_CANCELLED,
+      severity: "DANGER",
+      actorId: req.user.id,
+      title: `Cuộc họp bị huỷ: ${meeting.title}`,
+      message: `${req.user.full_name} đã xoá cuộc họp khỏi lịch.`,
+      excludeUserId: req.user.id
+    });
 
     await pool.query(
       `UPDATE meetings

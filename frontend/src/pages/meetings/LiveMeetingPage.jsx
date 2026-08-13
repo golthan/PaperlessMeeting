@@ -11,6 +11,7 @@ import {
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 import {
+  ArrowLeft,
   Camera,
   Check,
   Hand,
@@ -24,6 +25,7 @@ import { api } from "../../api/client.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
+import { useToast } from "../../components/ToastProvider.jsx";
 import { asArray, formatDateTime } from "../../utils/format.js";
 
 const liveTabs = ["agenda", "documents", "notes", "votes", "tasks"];
@@ -64,6 +66,7 @@ function voteOptions(vote) {
 export function LiveMeetingPage() {
   const { id } = useParams();
   const { user, token } = useAuth();
+  const toast = useToast();
   const [meeting, setMeeting] = useState(null);
   const [config, setConfig] = useState(null);
   const [chat, setChat] = useState([]);
@@ -81,6 +84,14 @@ export function LiveMeetingPage() {
   const isOrganizer = user.role === "ORGANIZER";
   const liveBackPath =
     user.role === "ORGANIZER" ? `/organizer/meetings/${id}` : `/participant/meetings/${id}`;
+
+  useEffect(() => {
+    if (notice) toast.success(notice);
+  }, [notice, toast]);
+
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error, toast]);
 
   async function loadData() {
     const [meetingRes, configRes, chatRes, publicNotesRes, personalNotesRes] =
@@ -350,7 +361,13 @@ export function LiveMeetingPage() {
   if (!meeting || !config) {
     return (
       <div className="page-stack">
-        {error ? <div className="alert error">{error}</div> : <div className="boot-screen">Loading live room...</div>}
+        <div className="live-topbar">
+          <Link className="back-button" to={liveBackPath}>
+            <ArrowLeft size={16} />
+            <span>Quay lại chi tiết cuộc họp</span>
+          </Link>
+        </div>
+        {error ? <div className="alert error">{error}</div> : <div className="boot-screen">Đang mở phòng họp...</div>}
       </div>
     );
   }
@@ -358,17 +375,26 @@ export function LiveMeetingPage() {
   return (
     <div className="live-room">
       <section className="live-topbar">
-        <div>
-          <h2>{meeting.title}</h2>
-          <p>
-            {formatDateTime(meeting.start_time)} · {meeting.meeting_type} · realtime {socketState}
-          </p>
+        <div className="live-topbar-left">
+          <Link className="back-button" to={liveBackPath}>
+            <ArrowLeft size={16} />
+            <span>Quay lại</span>
+          </Link>
+          <div>
+            <h2>{meeting.title}</h2>
+            <p>
+              {formatDateTime(meeting.start_time)} · {meeting.meeting_type} ·{" "}
+              <span className={`live-signal is-${socketState}`}>
+                realtime {socketState === "online" ? "đang kết nối" : socketState}
+              </span>
+            </p>
+          </div>
         </div>
         <div className="row-actions">
           <StatusPill value={meeting.status} />
           <Link className="danger-button" to={liveBackPath}>
             <PhoneOff size={16} />
-            Leave
+            Rời phòng
           </Link>
         </div>
       </section>

@@ -24,7 +24,9 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../api/client.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
+import { PageHeader } from "../../components/PageHeader.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
+import { useToast } from "../../components/ToastProvider.jsx";
 import { asArray, formatDate, formatDateTime, toDateTimeLocal } from "../../utils/format.js";
 
 const ROLE_LABELS = {
@@ -65,6 +67,7 @@ export function MeetingDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const toast = useToast();
   const [meeting, setMeeting] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [error, setError] = useState("");
@@ -108,6 +111,11 @@ export function MeetingDetailPage() {
     : isParticipant
       ? `/participant/meetings/${id}/live`
       : null;
+  const meetingsListPath = isOrganizer
+    ? "/organizer/meetings"
+    : isParticipant
+      ? "/participant/meetings"
+      : "/admin/meetings";
 
   async function load() {
     const res = await api.get(`/meetings/${id}`);
@@ -130,6 +138,15 @@ export function MeetingDetailPage() {
         .catch(() => {});
     }
   }, [id, user.role]);
+
+  // Mọi thông báo thành công/lỗi của trang đều bật thêm toast ở góc phải trên.
+  useEffect(() => {
+    if (message) toast.success(message);
+  }, [message, toast]);
+
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error, toast]);
 
   const participants = asArray(meeting?.participants);
   const participantOptions = useMemo(
@@ -378,6 +395,12 @@ export function MeetingDetailPage() {
   if (!meeting) {
     return (
       <div className="page-stack">
+        <PageHeader
+          eyebrow="Cuộc họp"
+          title="Chi tiết cuộc họp"
+          backTo={meetingsListPath}
+          backLabel="Danh sách cuộc họp"
+        />
         {error ? <div className="alert error">{error}</div> : <div className="boot-screen">Đang tải...</div>}
       </div>
     );
@@ -385,6 +408,14 @@ export function MeetingDetailPage() {
 
   return (
     <div className="page-stack">
+      <PageHeader
+        eyebrow="Hồ sơ cuộc họp"
+        title={meeting.title}
+        subtitle={`${formatDateTime(meeting.start_time)} · ${meeting.status}`}
+        backTo={meetingsListPath}
+        backLabel="Danh sách cuộc họp"
+      />
+
       {error && <div className="alert error">{error}</div>}
       {message && <div className="alert success">{message}</div>}
 

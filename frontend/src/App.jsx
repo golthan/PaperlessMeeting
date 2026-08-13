@@ -12,6 +12,7 @@ import { MeetingDetailPage } from "./pages/meetings/MeetingDetailPage.jsx";
 import { LiveMeetingPage } from "./pages/meetings/LiveMeetingPage.jsx";
 import { JoinRoomPage } from "./pages/meetings/JoinRoomPage.jsx";
 import { MyTasksPage } from "./pages/participant/MyTasksPage.jsx";
+import { NotificationsPage } from "./pages/NotificationsPage.jsx";
 
 function ProtectedRoute({ roles, children }) {
   const { user, booting } = useAuth();
@@ -44,6 +45,31 @@ export function App() {
           </ProtectedRoute>
         }
       >
+        <Route
+          path="/admin/notifications"
+          element={
+            <ProtectedRoute roles={["ADMIN"]}>
+              <NotificationsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/organizer/notifications"
+          element={
+            <ProtectedRoute roles={["ORGANIZER"]}>
+              <NotificationsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/participant/notifications"
+          element={
+            <ProtectedRoute roles={["PARTICIPANT"]}>
+              <NotificationsPage />
+            </ProtectedRoute>
+          }
+        />
+
         <Route
           path="/admin/dashboard"
           element={

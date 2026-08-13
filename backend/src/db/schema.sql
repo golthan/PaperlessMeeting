@@ -265,6 +265,26 @@ CREATE TABLE IF NOT EXISTS meeting_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_meeting_sessions_meeting ON meeting_sessions(meeting_id);
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  meeting_id UUID REFERENCES meetings(id) ON DELETE CASCADE,
+  type VARCHAR(50) NOT NULL,
+  severity VARCHAR(20) NOT NULL DEFAULT 'INFO',
+  title VARCHAR(255) NOT NULL,
+  message TEXT,
+  link TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT notifications_severity_check CHECK (severity IN ('INFO', 'SUCCESS', 'WARNING', 'DANGER'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE is_read = FALSE;
+
 ALTER TABLE departments ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
@@ -273,6 +293,7 @@ ALTER TABLE meetings ADD COLUMN IF NOT EXISTS online_provider VARCHAR(50) NOT NU
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS online_room_name VARCHAR(255);
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS online_room_url TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ;
 ALTER TABLE meetings ALTER COLUMN room_id DROP NOT NULL;
 ALTER TABLE meeting_participants ADD COLUMN IF NOT EXISTS can_share_screen BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE meeting_participants ADD COLUMN IF NOT EXISTS can_upload_document BOOLEAN NOT NULL DEFAULT FALSE;

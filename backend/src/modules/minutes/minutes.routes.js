@@ -10,6 +10,10 @@ import {
   assertMeetingAccess,
   assertMeetingOrganizer
 } from "../meetings/meetingAccess.js";
+import {
+  NOTIFICATION_TYPES,
+  notifyMeetingAudience
+} from "../notifications/notifications.service.js";
 
 export const meetingMinutesRouter = express.Router({ mergeParams: true });
 export const minutesRouter = express.Router();
@@ -117,6 +121,17 @@ minutesRouter.put(
        RETURNING *`,
       [req.params.id]
     );
+
+    await notifyMeetingAudience(minutes.meeting_id, {
+      type: NOTIFICATION_TYPES.MINUTES_PUBLISHED,
+      severity: "SUCCESS",
+      actorId: req.user.id,
+      title: "Biên bản họp đã được ban hành",
+      message: `Biên bản cuộc họp "${minutes.meeting_title}" đã công bố, bạn có thể xem và tải PDF.`,
+      metadata: { minutesId: minutes.id },
+      excludeUserId: req.user.id
+    });
+
     res.json({ data: rows[0] });
   })
 );

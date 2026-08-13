@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Pressable,
   StyleSheet,
   Text,
@@ -9,6 +10,34 @@ import {
   View
 } from "react-native";
 import { colors, radii, shadow, spacing } from "./theme";
+
+/**
+ * Hiệu ứng bấm dùng chung: phần tử thu nhỏ khi ngón tay chạm và bật lại khi nhả.
+ * Dùng useNativeDriver nên chạy mượt cả trên máy yếu.
+ */
+export function usePressScale(to = 0.96) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const onPressIn = useCallback(() => {
+    Animated.spring(scale, {
+      toValue: to,
+      useNativeDriver: true,
+      speed: 40,
+      bounciness: 0
+    }).start();
+  }, [scale, to]);
+
+  const onPressOut = useCallback(() => {
+    Animated.spring(scale, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 26,
+      bounciness: 9
+    }).start();
+  }, [scale]);
+
+  return { scale, onPressIn, onPressOut };
+}
 
 const toneMap = {
   ACTIVE: "success",
@@ -47,7 +76,14 @@ function initials(value) {
     .join("");
 }
 
-export function Header({ title, subtitle, onLogout, onBack }) {
+export function Header({
+  title,
+  subtitle,
+  onLogout,
+  onBack,
+  onOpenNotifications,
+  unreadCount = 0
+}) {
   return (
     <View style={styles.header}>
       <View style={styles.headerRow}>
@@ -66,96 +102,215 @@ export function Header({ title, subtitle, onLogout, onBack }) {
             {subtitle}
           </Text>
         </View>
+        {!!onOpenNotifications && (
+          <NotificationButton count={unreadCount} onPress={onOpenNotifications} />
+        )}
         <IconButton icon="log-out-outline" label="Đăng xuất" onPress={onLogout} />
       </View>
     </View>
   );
 }
 
-export function BottomTabs({ active, onChange }) {
-  const tabs = [
-    ["dashboard", "Tổng quan", "grid", "grid-outline"],
-    ["meetings", "Cuộc họp", "calendar", "calendar-outline"],
-    ["tasks", "Nhiệm vụ", "checkbox", "checkbox-outline"]
-  ];
+/** Chuông thông báo có badge số chưa đọc, rung nhẹ mỗi khi có tin mới. */
+export function NotificationButton({ count = 0, onPress }) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.9);
+  const shake = useRef(new Animated.Value(0)).current;
+  const previous = useRef(count);
+
+  useEffect(() => {
+    if (count > previous.current) {
+      Animated.sequence([
+        Animated.timing(shake, { toValue: 1, duration: 90, useNativeDriver: true }),
+        Animated.timing(shake, { toValue: -1, duration: 90, useNativeDriver: true }),
+        Animated.timing(shake, { toValue: 0.6, duration: 80, useNativeDriver: true }),
+        Animated.timing(shake, { toValue: 0, duration: 80, useNativeDriver: true })
+      ]).start();
+    }
+    previous.current = count;
+  }, [count, shake]);
+
+  const rotate = shake.interpolate({
+    inputRange: [-1, 1],
+    outputRange: ["-14deg", "14deg"]
+  });
 
   return (
-    <View style={styles.tabs}>
-      {tabs.map(([name, label, iconActive, icon]) => {
-        const isActive = active === name;
-        return (
-          <Pressable
-            key={name}
-            style={styles.tab}
-            onPress={() => onChange(name)}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: isActive }}
-          >
-            <View style={[styles.tabIcon, isActive && styles.tabIconActive]}>
-              <Ionicons
-                name={isActive ? iconActive : icon}
-                size={19}
-                color={isActive ? colors.primary : colors.muted}
-              />
-            </View>
-            <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
-              {label}
-            </Text>
-          </Pressable>
-        );
-      })}
+    <Pressable
+      onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={`Thông báo${count > 0 ? `, ${count} chưa đọc` : ""}`}
+    >
+      <Animated.View style={[styles.iconButton, { transform: [{ scale }, { rotate }] }]}>
+        <Ionicons name="notifications-outline" size={19} color={colors.primary} />
+        {count > 0 && (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{count > 99 ? "99+" : count}</Text>
+          </View>
+        )}
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+/** Thanh quay lại đặt đầu các màn hình con để luôn có đường thoát rõ ràng. */
+export function BackBar({ label = "Quay lại", onPress, right }) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.97);
+
+  return (
+    <View style={styles.backBar}>
+      <Pressable
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        accessibilityRole="button"
+      >
+        <Animated.View style={[styles.backChip, { transform: [{ scale }] }]}>
+          <Ionicons name="chevron-back" size={16} color={colors.primaryDark} />
+          <Text style={styles.backChipText}>{label}</Text>
+        </Animated.View>
+      </Pressable>
+      {right}
     </View>
   );
 }
 
-export function PrimaryButton({ icon, title, onPress, disabled, danger }) {
+const TAB_ITEMS = [
+  ["dashboard", "Tổng quan", "grid", "grid-outline"],
+  ["meetings", "Cuộc họp", "calendar", "calendar-outline"],
+  ["notifications", "Thông báo", "notifications", "notifications-outline"],
+  ["tasks", "Nhiệm vụ", "checkbox", "checkbox-outline"]
+];
+
+function TabButton({ name, label, iconActive, icon, isActive, badge, onPress }) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.9);
+
   return (
     <Pressable
-      style={({ pressed }) => [
-        styles.button,
-        danger ? styles.dangerButton : styles.primaryButton,
-        pressed && !disabled && styles.buttonPressed,
-        disabled && styles.disabledButton
-      ]}
+      style={styles.tab}
       onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: isActive }}
     >
-      {icon && <Ionicons name={icon} size={17} color={colors.onPrimary} />}
-      <Text style={styles.primaryButtonText}>{title}</Text>
+      <Animated.View
+        style={[styles.tabIcon, isActive && styles.tabIconActive, { transform: [{ scale }] }]}
+      >
+        <Ionicons
+          name={isActive ? iconActive : icon}
+          size={19}
+          color={isActive ? colors.primary : colors.muted}
+        />
+        {badge > 0 && (
+          <View style={styles.tabBadge}>
+            <Text style={styles.badgeText}>{badge > 99 ? "99+" : badge}</Text>
+          </View>
+        )}
+      </Animated.View>
+      <Text style={[styles.tabText, isActive && styles.tabTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+export function BottomTabs({ active, onChange, unreadCount = 0 }) {
+  return (
+    <View style={styles.tabs}>
+      {TAB_ITEMS.map(([name, label, iconActive, icon]) => (
+        <TabButton
+          key={name}
+          name={name}
+          label={label}
+          icon={icon}
+          iconActive={iconActive}
+          isActive={active === name}
+          badge={name === "notifications" ? unreadCount : 0}
+          onPress={() => onChange(name)}
+        />
+      ))}
+    </View>
+  );
+}
+
+export function PrimaryButton({ icon, title, onPress, disabled, danger, loading }) {
+  const { scale, onPressIn, onPressOut } = usePressScale();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled || loading) }}
+    >
+      <Animated.View
+        style={[
+          styles.button,
+          danger ? styles.dangerButton : styles.primaryButton,
+          (disabled || loading) && styles.disabledButton,
+          { transform: [{ scale }] }
+        ]}
+      >
+        {loading ? (
+          <ActivityIndicator color={colors.onPrimary} size="small" />
+        ) : (
+          icon && <Ionicons name={icon} size={17} color={colors.onPrimary} />
+        )}
+        <Text style={styles.primaryButtonText}>{title}</Text>
+      </Animated.View>
     </Pressable>
   );
 }
 
 export function SecondaryButton({ icon, title, onPress, disabled }) {
+  const { scale, onPressIn, onPressOut } = usePressScale();
+
   return (
     <Pressable
-      style={({ pressed }) => [
-        styles.button,
-        styles.secondaryButton,
-        pressed && !disabled && styles.buttonPressed,
-        disabled && styles.disabledButton
-      ]}
       onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
       disabled={disabled}
       accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled) }}
     >
-      {icon && <Ionicons name={icon} size={17} color={colors.primary} />}
-      <Text style={styles.secondaryButtonText}>{title}</Text>
+      <Animated.View
+        style={[
+          styles.button,
+          styles.secondaryButton,
+          disabled && styles.disabledButton,
+          { transform: [{ scale }] }
+        ]}
+      >
+        {icon && <Ionicons name={icon} size={17} color={colors.primary} />}
+        <Text style={styles.secondaryButtonText}>{title}</Text>
+      </Animated.View>
     </Pressable>
   );
 }
 
-export function IconButton({ icon, label, onPress }) {
+export function IconButton({ icon, label, onPress, disabled }) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.9);
+
   return (
     <Pressable
-      style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}
       onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      disabled={disabled}
       accessibilityLabel={label}
       accessibilityRole="button"
       hitSlop={6}
     >
-      <Ionicons name={icon} size={19} color={colors.primary} />
+      <Animated.View
+        style={[styles.iconButton, disabled && styles.disabledButton, { transform: [{ scale }] }]}
+      >
+        <Ionicons name={icon} size={19} color={colors.primary} />
+      </Animated.View>
     </Pressable>
   );
 }
@@ -268,12 +423,17 @@ export function StatBox({ icon, label, value }) {
 }
 
 export function CardRow({ title, subtitle, meta, right, onPress }) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.985);
+
   return (
     <Pressable
-      style={({ pressed }) => [styles.rowCard, pressed && onPress && styles.rowCardPressed]}
       onPress={onPress}
+      onPressIn={onPress ? onPressIn : undefined}
+      onPressOut={onPress ? onPressOut : undefined}
       disabled={!onPress}
+      accessibilityRole={onPress ? "button" : undefined}
     >
+      <Animated.View style={[styles.rowCard, { transform: [{ scale }] }]}>
       <View style={styles.rowCardBody}>
         <Text style={styles.rowTitle}>{title}</Text>
         {!!subtitle && <Text style={styles.rowSubtitle}>{subtitle}</Text>}
@@ -290,6 +450,7 @@ export function CardRow({ title, subtitle, meta, right, onPress }) {
           <Ionicons name="chevron-forward" size={17} color={colors.subtle} />
         )}
       </View>
+      </Animated.View>
     </Pressable>
   );
 }
@@ -424,6 +585,65 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: "center",
     width: 40
+  },
+
+  /* Badge & thanh quay lại */
+  badge: {
+    alignItems: "center",
+    backgroundColor: colors.danger,
+    borderColor: colors.surface,
+    borderRadius: radii.full,
+    borderWidth: 2,
+    height: 19,
+    justifyContent: "center",
+    minWidth: 19,
+    paddingHorizontal: 3,
+    position: "absolute",
+    right: -6,
+    top: -6
+  },
+  badgeText: {
+    color: colors.onPrimary,
+    fontSize: 10,
+    fontWeight: "800"
+  },
+  tabBadge: {
+    alignItems: "center",
+    backgroundColor: colors.danger,
+    borderColor: colors.surface,
+    borderRadius: radii.full,
+    borderWidth: 2,
+    height: 18,
+    justifyContent: "center",
+    minWidth: 18,
+    paddingHorizontal: 3,
+    position: "absolute",
+    right: 8,
+    top: -4
+  },
+  backBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: spacing.sm
+  },
+  backChip: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.full,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    ...shadow(1)
+  },
+  backChipText: {
+    color: colors.primaryDark,
+    fontSize: 13,
+    fontWeight: "800"
   },
 
   /* Fields */

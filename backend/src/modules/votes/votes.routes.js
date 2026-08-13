@@ -15,6 +15,10 @@ import {
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
 import { emitMeetingEvent } from "../../config/socket.js";
+import {
+  NOTIFICATION_TYPES,
+  notifyMeetingAudience
+} from "../notifications/notifications.service.js";
 
 export const meetingVotesRouter = express.Router({ mergeParams: true });
 export const votesRouter = express.Router();
@@ -139,6 +143,15 @@ votesRouter.put(
       [req.params.id]
     );
     emitMeetingEvent(vote.meeting_id, "vote_opened", rows[0]);
+    await notifyMeetingAudience(vote.meeting_id, {
+      type: NOTIFICATION_TYPES.VOTE_OPENED,
+      severity: "WARNING",
+      actorId: req.user.id,
+      title: "Có phiên biểu quyết đang mở",
+      message: `"${rows[0].title}" đang chờ ý kiến của bạn.`,
+      metadata: { voteId: rows[0].id },
+      excludeUserId: req.user.id
+    });
     res.json({ data: rows[0] });
   })
 );

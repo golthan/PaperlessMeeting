@@ -15,6 +15,14 @@ import {
   assertMeetingOrganizer,
   assertUserIsParticipantOfMeeting
 } from "../meetings/meetingAccess.js";
+import { NOTIFICATION_TYPES, notifyUsers } from "../notifications/notifications.service.js";
+
+const TASK_STATUS_LABELS = {
+  TODO: "Chưa làm",
+  IN_PROGRESS: "Đang làm",
+  DONE: "Hoàn thành",
+  OVERDUE: "Quá hạn"
+};
 
 export const meetingTasksRouter = express.Router({ mergeParams: true });
 export const tasksRouter = express.Router();
@@ -62,7 +70,7 @@ meetingTasksRouter.post(
   "/",
   requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.meetingId);
+    const meeting = await assertMeetingOrganizer(req.user, req.params.meetingId);
     requireFields(req.body, ["assignedTo", "title"]);
     assertEnum(req.body.priority || "MEDIUM", TASK_PRIORITIES, "task priority");
     await assertUserIsParticipantOfMeeting(req.params.meetingId, req.body.assignedTo);
@@ -89,6 +97,20 @@ meetingTasksRouter.post(
         req.body.priority || "MEDIUM"
       ]
     );
+
+    await notifyUsers([rows[0].assigned_to], {
+      type: NOTIFICATION_TYPES.TASK_ASSIGNED,
+      severity: "INFO",
+      meetingId: req.params.meetingId,
+      actorId: req.user.id,
+      title: "Bạn được giao nhiệm vụ mới",
+      message: `${req.user.full_name} giao "${rows[0].title}" từ cuộc họp "${meeting.title}"${
+        rows[0].deadline ? `, hạn ${rows[0].deadline}` : ""
+      }.`,
+      metadata: { taskId: rows[0].id, target: "TASKS" },
+      excludeUserId: req.user.id
+    });
+
     res.status(201).json({ data: rows[0] });
   })
 );
@@ -161,6 +183,20 @@ tasksRouter.put(
         req.params.id
       ]
     );
+
+    await notifyUsers([rows[0].assigned_to], {
+      type: NOTIFICATION_TYPES.TASK_UPDATED,
+      severity: "INFO",
+      meetingId: task.meeting_id,
+      actorId: req.user.id,
+      title: "Nhiệm vụ của bạn được cập nhật",
+      message: `${req.user.full_name} đã chỉnh sửa nhiệm vụ "${rows[0].title}" (${
+        TASK_STATUS_LABELS[rows[0].status] || rows[0].status
+      }).`,
+      metadata: { taskId: rows[0].id, target: "TASKS" },
+      excludeUserId: req.user.id
+    });
+
     res.json({ data: rows[0] });
   })
 );
@@ -186,6 +222,20 @@ tasksRouter.put(
        RETURNING *`,
       [req.body.status, req.params.id]
     );
+
+    await notifyUsers([task.organizer_id, task.assigned_to], {
+      type: NOTIFICATION_TYPES.TASK_UPDATED,
+      severity: rows[0].status === "DONE" ? "SUCCESS" : "INFO",
+      meetingId: task.meeting_id,
+      actorId: req.user.id,
+      title: "Nhiệm vụ đổi trạng thái",
+      message: `${req.user.full_name} chuyển "${rows[0].title}" sang ${
+        TASK_STATUS_LABELS[rows[0].status] || rows[0].status
+      }.`,
+      metadata: { taskId: rows[0].id, target: "TASKS" },
+      excludeUserId: req.user.id
+    });
+
     res.json({ data: rows[0] });
   })
 );

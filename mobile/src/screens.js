@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Image,
   Linking,
   Pressable,
@@ -15,6 +14,7 @@ import {
 } from "react-native";
 import { apiRequest, documentDownloadUrl, liveJoinUrl } from "./api";
 import {
+  BackBar,
   CardRow,
   EmptyState,
   ErrorState,
@@ -197,8 +197,13 @@ export function MeetingsScreen({ auth, refreshKey, onOpenMeeting }) {
         token: auth.token
       });
       await load();
+      auth.toast?.success(
+        action === "accept" ? "Đã xác nhận tham dự" : "Đã từ chối lời mời",
+        "Người tổ chức sẽ nhận được phản hồi của bạn."
+      );
     } catch (err) {
       setError(err.message);
+      auth.toast?.error("Không cập nhật được lời mời", err.message);
     }
   }
 
@@ -283,8 +288,12 @@ export function TasksScreen({ auth, refreshKey }) {
         body: { status }
       });
       await load();
+      auth.toast?.success(
+        status === "DONE" ? "Đã hoàn thành nhiệm vụ" : "Đã cập nhật trạng thái nhiệm vụ"
+      );
     } catch (err) {
       setError(err.message);
+      auth.toast?.error("Không cập nhật được nhiệm vụ", err.message);
     }
   }
 
@@ -343,7 +352,7 @@ export function TasksScreen({ auth, refreshKey }) {
   );
 }
 
-export function MeetingDetailScreen({ auth, meetingId, onOpenLive }) {
+export function MeetingDetailScreen({ auth, meetingId, onOpenLive, onBack }) {
   const [meeting, setMeeting] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [error, setError] = useState("");
@@ -368,10 +377,11 @@ export function MeetingDetailScreen({ auth, meetingId, onOpenLive }) {
     setError("");
     try {
       await action();
-      if (success) Alert.alert("Thành công", success);
+      if (success) auth.toast?.success(success);
       await load();
     } catch (err) {
       setError(err.message);
+      auth.toast?.error("Thao tác thất bại", err.message);
     }
   }
 
@@ -461,6 +471,7 @@ export function MeetingDetailScreen({ auth, meetingId, onOpenLive }) {
   if (!meeting) {
     return (
       <View style={styles.screenContent}>
+        {!!onBack && <BackBar label="Danh sách cuộc họp" onPress={onBack} />}
         <ErrorState message={error || "Không tìm thấy cuộc họp"} />
       </View>
     );
@@ -468,6 +479,11 @@ export function MeetingDetailScreen({ auth, meetingId, onOpenLive }) {
 
   return (
     <View style={styles.detailShell}>
+      {!!onBack && (
+        <View style={styles.nestedBackBar}>
+          <BackBar label="Danh sách cuộc họp" onPress={onBack} />
+        </View>
+      )}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBar}>
         {detailTabs.map((tab) => (
           <Pressable
@@ -764,7 +780,7 @@ function MeetingTasksTab({ meeting, onStatus }) {
   );
 }
 
-export function LiveMeetingScreen({ auth, meetingId }) {
+export function LiveMeetingScreen({ auth, meetingId, onBack }) {
   const [meeting, setMeeting] = useState(null);
   const [liveConfig, setLiveConfig] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
@@ -827,17 +843,21 @@ export function LiveMeetingScreen({ auth, meetingId }) {
     setError("");
     try {
       await action();
-      if (success) Alert.alert("Thành công", success);
+      if (success) auth.toast?.success(success);
       await load();
     } catch (err) {
       setError(err.message);
+      auth.toast?.error("Thao tác thất bại", err.message);
     }
   }
 
   async function openOnlineRoom() {
     const token = liveConfig?.livekitToken;
     if (!token) {
-      Alert.alert("Chưa có phòng online", "Cuộc họp này chưa có phòng họp trực tuyến.");
+      auth.toast?.warning(
+        "Chưa có phòng online",
+        "Cuộc họp này chưa có phòng họp trực tuyến."
+      );
       return;
     }
     await Linking.openURL(liveJoinUrl(meetingId, token));
@@ -923,6 +943,11 @@ export function LiveMeetingScreen({ auth, meetingId }) {
 
   return (
     <View style={styles.detailShell}>
+      {!!onBack && (
+        <View style={styles.nestedBackBar}>
+          <BackBar label="Rời phòng họp" onPress={onBack} />
+        </View>
+      )}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBar}>
         {liveTabs.map((tab) => (
           <Pressable
@@ -1100,8 +1125,8 @@ export function LiveMeetingScreen({ auth, meetingId }) {
                 meeting={meeting}
                 token={auth.token}
                 onUpload={() =>
-                  Alert.alert(
-                    "Upload tài liệu",
+                  auth.toast?.info(
+                    "Tải tài liệu lên",
                     "Vui lòng gửi tài liệu từ màn hình chi tiết cuộc họp."
                   )
                 }
@@ -1288,6 +1313,13 @@ const styles = StyleSheet.create({
   },
   detailShell: {
     flex: 1
+  },
+  nestedBackBar: {
+    backgroundColor: colors.surface,
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm
   },
   tabBar: {
     backgroundColor: colors.surface,

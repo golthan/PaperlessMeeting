@@ -9,6 +9,11 @@ function roomName(meetingId) {
   return `meeting:${meetingId}`;
 }
 
+/** Mỗi user có một room riêng để nhận thông báo cá nhân ở mọi màn hình. */
+function userRoomName(userId) {
+  return `user:${userId}`;
+}
+
 function sanitizeText(value) {
   return String(value || "")
     .replace(/[<>]/g, "")
@@ -88,6 +93,8 @@ export function initSocket(httpServer) {
   });
 
   meetingNamespace.on("connection", (socket) => {
+    socket.join(userRoomName(socket.user.id));
+
     socket.on("join_meeting_room", async ({ meetingId }, callback) => {
       try {
         const meeting = await canAccessMeeting(socket.user, meetingId);
@@ -269,6 +276,15 @@ export function getIO() {
 
 export function emitMeetingEvent(meetingId, event, payload) {
   ioInstance?.of("/meeting").to(roomName(meetingId)).emit(event, payload);
+}
+
+/** Đẩy sự kiện tới toàn bộ thiết bị đang mở của những user chỉ định. */
+export function emitToUsers(userIds, event, payload) {
+  const namespace = ioInstance?.of("/meeting");
+  if (!namespace) return;
+  for (const userId of new Set((userIds || []).filter(Boolean))) {
+    namespace.to(userRoomName(userId)).emit(event, payload);
+  }
 }
 
 async function updateHand(socket, meetingId, isRaised, callback) {

@@ -7,6 +7,8 @@ Hệ thống phòng họp không giấy tờ theo spec Live, không tích hợp 
 - Backend Node.js + Express + PostgreSQL, JWT auth, phân quyền Admin, Organizer, Participant.
 - Quản lý phòng ban, phòng họp, người dùng, cuộc họp, người tham dự, tài liệu, agenda, điểm danh, biểu quyết, biên bản, task.
 - Live Meeting Room bằng Socket.IO: trạng thái online, chat realtime, raise hand, cập nhật agenda/tài liệu/vote/điểm danh/ghi chú chung.
+- Trung tâm thông báo cho cả 3 vai trò: mời họp, đổi lịch, huỷ họp, bắt đầu/kết thúc, nhắc lịch trước 15 phút, duyệt tài liệu, mở biểu quyết, ban hành biên bản, giao và cập nhật nhiệm vụ. Thông báo hiện realtime ở góc phải trên (web và mobile) kèm chuông đếm số chưa đọc.
+- Tác vụ nền định kỳ: nhắc lịch họp sắp diễn ra, tự chuyển nhiệm vụ quá hạn sang OVERDUE, tự đóng cuộc họp quá giờ kết thúc.
 - Họp `OFFLINE`, `ONLINE`, `HYBRID`; bản online/hybrid tự tạo phòng họp video LiveKit self-host (không phụ thuộc dịch vụ bên thứ ba).
 - Archive sau họp gồm nội dung họp, chat, ghi chú chung, attendance và session.
 - Frontend React/Vite cho Admin, Organizer, Participant.
@@ -113,6 +115,14 @@ Lưu ý monorepo: project dùng npm workspaces nên có 2 bản React (frontend 
 3. Mở chi tiết cuộc họp hoặc danh sách cuộc họp, bấm `Bắt đầu & vào phòng`.
 4. Đăng nhập Participant trên web hoặc Android, nhận lời mời, rồi bấm `Vào phòng` khi cuộc họp đang `ONGOING`.
 5. Thử chat, điểm danh, ghi chú cá nhân, ghi chú chung, agenda, trình chiếu tài liệu và vote.
+6. Mở mục `Thông báo` (chuông ở góc phải trên hoặc menu bên trái) để xem lời mời, thay đổi lịch, biểu quyết và nhiệm vụ mới.
+
+## Thông báo (web + mobile)
+
+- Backend lưu thông báo trong bảng `notifications` và đẩy realtime qua Socket.IO tới room riêng `user:<id>` của từng người, nên người dùng nhận được thông báo ở mọi màn hình chứ không chỉ trong phòng Live.
+- Web: `ToastProvider` hiện toast ở góc phải trên, `NotificationBell` trên thanh trên cùng hiển thị số chưa đọc, trang `/{role}/notifications` cho phép lọc, đánh dấu đã đọc và xoá.
+- Mobile: app không mở socket mà hỏi API 20 giây một lần (`useNotificationCenter`), thông báo mới hiện toast góc phải trên, tab `Thông báo` có badge số chưa đọc.
+- API: `GET /notifications`, `GET /notifications/unread-count`, `PUT /notifications/:id/read`, `PUT /notifications/read-all`, `DELETE /notifications/:id`, `DELETE /notifications/read`.
 
 ## Phòng họp video LiveKit (self-host)
 
