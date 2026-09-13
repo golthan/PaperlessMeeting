@@ -13,6 +13,8 @@ import { LiveMeetingPage } from "./pages/meetings/LiveMeetingPage.jsx";
 import { JoinRoomPage } from "./pages/meetings/JoinRoomPage.jsx";
 import { MyTasksPage } from "./pages/participant/MyTasksPage.jsx";
 import { NotificationsPage } from "./pages/NotificationsPage.jsx";
+import { AuditLogPage } from "./pages/admin/AuditLogPage.jsx";
+import { VerifyMinutesPage } from "./pages/VerifyMinutesPage.jsx";
 
 function ProtectedRoute({ roles, children }) {
   const { user, booting } = useAuth();
@@ -37,6 +39,9 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/join/:id" element={<JoinRoomPage />} />
+      {/* Tra cuu bien ban bang ma QR: cong khai, khong can dang nhap. */}
+      <Route path="/verify" element={<VerifyMinutesPage />} />
+      <Route path="/verify/:code" element={<VerifyMinutesPage />} />
 
       <Route
         element={
@@ -91,6 +96,14 @@ export function App() {
           element={
             <ProtectedRoute roles={["ADMIN"]}>
               <DepartmentsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/audit-logs"
+          element={
+            <ProtectedRoute roles={["ADMIN"]}>
+              <AuditLogPage />
             </ProtectedRoute>
           }
         />

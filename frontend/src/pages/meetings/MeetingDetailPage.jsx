@@ -16,6 +16,7 @@ import {
   Upload,
   UserPlus,
   Video,
+  VideoOff,
   Vote,
   X
 } from "lucide-react";
@@ -27,31 +28,33 @@ import { EmptyState } from "../../components/EmptyState.jsx";
 import { PageHeader } from "../../components/PageHeader.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
 import { useToast } from "../../components/ToastProvider.jsx";
+import { MinutesPanel } from "../../components/MinutesPanel.jsx";
+import { VoteCard } from "../../components/VoteCard.jsx";
 import { asArray, formatDate, formatDateTime, toDateTimeLocal } from "../../utils/format.js";
+import {
+  attendanceMethodLabel,
+  attendanceSummary,
+  hasOnlineRoom,
+  MEETING_MODES,
+  meetingPlaceLabel,
+  percent,
+  resolveMeetingType
+} from "../../utils/meeting.js";
 
 const ROLE_LABELS = {
   SECRETARY: "Thư ký",
   MEMBER: "Thành viên"
 };
 
-const tabs = [
+const BASE_TABS = [
   ["overview", "Tổng quan"],
   ["documents", "Tài liệu"],
-  ["agenda", "Agenda"],
+  ["agenda", "Chương trình"],
   ["attendance", "Điểm danh"],
   ["votes", "Biểu quyết"],
   ["minutes", "Biên bản"],
   ["tasks", "Nhiệm vụ"]
 ];
-
-function voteOptions(vote) {
-  if (Array.isArray(vote.options)) return vote.options;
-  try {
-    return JSON.parse(vote.options || "[]");
-  } catch {
-    return [];
-  }
-}
 
 async function downloadBlob(path, filename) {
   const res = await api.get(path, { responseType: "blob" });
@@ -92,9 +95,10 @@ export function MeetingDetailPage() {
     title: "",
     description: "",
     type: "YES_NO_ABSTAIN",
+    isAnonymous: false,
     options: "Phương án 1\nPhương án 2"
   });
-  const [minutesContent, setMinutesContent] = useState("");
+  const [auditLogs, setAuditLogs] = useState([]);
   const [taskForm, setTaskForm] = useState({
     assignedTo: "",
     title: "",
@@ -105,7 +109,14 @@ export function MeetingDetailPage() {
 
   const isOrganizer = user.role === "ORGANIZER";
   const isParticipant = user.role === "PARTICIPANT";
-  const hasOnlineRoom = meeting?.meeting_type !== "OFFLINE";
+  const onlineRoomOn = hasOnlineRoom(meeting);
+  // Chủ trì và thư ký của cuộc họp là hai người được ký số biên bản.
+  const canSignMinutes =
+    isOrganizer ||
+    asArray(meeting?.participants).some(
+      (item) => item.user_id === user.id && item.role_in_meeting === "SECRETARY"
+    );
+  const tabs = isOrganizer ? [...BASE_TABS, ["audit", "Nhật ký"]] : BASE_TABS;
   const livePath = isOrganizer
     ? `/organizer/meetings/${id}/live`
     : isParticipant
@@ -120,7 +131,6 @@ export function MeetingDetailPage() {
   async function load() {
     const res = await api.get(`/meetings/${id}`);
     setMeeting(res.data.data);
-    setMinutesContent(res.data.data.minutes?.content || "");
     setTaskForm((current) => ({
       ...current,
       assignedTo: current.assignedTo || res.data.data.participants?.[0]?.user_id || ""
@@ -139,6 +149,15 @@ export function MeetingDetailPage() {
     }
   }, [id, user.role]);
 
+  // Nhật ký của riêng cuộc họp này, chỉ chủ trì xem được.
+  useEffect(() => {
+    if (activeTab !== "audit" || user.role !== "ORGANIZER") return;
+    api
+      .get(`/meetings/${id}/audit-logs`, { params: { limit: 100 } })
+      .then((res) => setAuditLogs(res.data.data || []))
+      .catch(() => setAuditLogs([]));
+  }, [activeTab, id, user.role]);
+
   // Mọi thông báo thành công/lỗi của trang đều bật thêm toast ở góc phải trên.
   useEffect(() => {
     if (message) toast.success(message);
@@ -149,6 +168,9 @@ export function MeetingDetailPage() {
   }, [error, toast]);
 
   const participants = asArray(meeting?.participants);
+  const myParticipant = participants.find((item) => item.user_id === user.id);
+  const checkedIn = ["PRESENT", "LATE"].includes(myParticipant?.attendance_status);
+  const attendance = useMemo(() => attendanceSummary(participants), [participants]);
   const participantOptions = useMemo(
     () => participants.map((item) => ({ value: item.user_id, label: `${item.full_name} - ${item.email}` })),
     [participants]
@@ -161,8 +183,10 @@ export function MeetingDetailPage() {
       await action();
       setMessage(success);
       await load();
+      return true;
     } catch (err) {
       setError(err.response?.data?.message || "Thao tác thất bại");
+      return false;
     }
   }
 
@@ -179,7 +203,8 @@ export function MeetingDetailPage() {
       title: meeting.title || "",
       description: meeting.description || "",
       notes: meeting.notes || "",
-      meetingType: meeting.meeting_type,
+      meetingMode: meeting.meeting_type === "ONLINE" ? "ONLINE" : "OFFLINE",
+      onlineRoom: meeting.meeting_type !== "OFFLINE",
       startTime: toDateTimeLocal(new Date(meeting.start_time)),
       endTime: toDateTimeLocal(new Date(meeting.end_time)),
       roomId: meeting.room_id || "",
@@ -190,8 +215,8 @@ export function MeetingDetailPage() {
 
   async function saveEdit(event) {
     event.preventDefault();
-    if (editForm.meetingType !== "ONLINE" && !editForm.roomId) {
-      setError("Cuộc họp tập trung / kết hợp cần chọn phòng họp vật lý");
+    if (editForm.meetingMode === "OFFLINE" && !editForm.roomId) {
+      setError("Cuộc họp tập trung cần chọn phòng họp vật lý");
       return;
     }
     await run(
@@ -200,10 +225,10 @@ export function MeetingDetailPage() {
           title: editForm.title,
           description: editForm.description || null,
           notes: editForm.notes || null,
-          meetingType: editForm.meetingType,
+          meetingType: resolveMeetingType(editForm.meetingMode, editForm.onlineRoom),
           startTime: editForm.startTime,
           endTime: editForm.endTime,
-          roomId: editForm.meetingType === "ONLINE" ? null : editForm.roomId,
+          roomId: editForm.meetingMode === "ONLINE" ? null : editForm.roomId,
           status: editForm.status
         }),
       "Đã lưu thay đổi cuộc họp"
@@ -293,7 +318,7 @@ export function MeetingDetailPage() {
   }
 
   async function changeMeetingStatus(action) {
-    if (action === "start" && livePath && hasOnlineRoom) {
+    if (action === "start" && livePath) {
       setError("");
       setMessage("");
       try {
@@ -305,6 +330,16 @@ export function MeetingDetailPage() {
       return;
     }
     await run(() => api.put(`/meetings/${id}/${action}`), "Đã cập nhật trạng thái cuộc họp");
+  }
+
+  /** Bật / tắt phòng video cho cuộc họp tập trung. */
+  async function changeOnlineRoom(enabled) {
+    await run(
+      () => api.put(`/meetings/${id}/online-room`, { enabled }),
+      enabled
+        ? "Đã bật phòng họp trực tuyến và báo cho người tham dự"
+        : "Đã tắt phòng họp trực tuyến"
+    );
   }
 
   async function uploadDocument(event) {
@@ -348,36 +383,77 @@ export function MeetingDetailPage() {
     }
   }
 
-  async function createVote(event) {
-    event.preventDefault();
+  /** Tạo biểu quyết: mặc định lưu nháp, openNow = true thì mở lấy ý kiến ngay. */
+  async function createVote(event, openNow = false) {
+    event?.preventDefault?.();
+    if (!voteForm.title.trim()) {
+      setError("Nhập nội dung cần biểu quyết");
+      return;
+    }
     const options =
       voteForm.type === "MULTIPLE_CHOICE"
-        ? voteForm.options.split("\n").map((item) => item.trim()).filter(Boolean)
+        ? voteForm.options
+            .split("\n")
+            .map((item) => item.trim())
+            .filter(Boolean)
         : undefined;
-    await run(
-      () => api.post(`/meetings/${id}/votes`, { ...voteForm, options }),
-      "Đã tạo biểu quyết"
+    const ok = await run(
+      () =>
+        api.post(`/meetings/${id}/votes`, {
+          title: voteForm.title,
+          description: voteForm.description,
+          type: voteForm.type,
+          isAnonymous: voteForm.isAnonymous,
+          options,
+          openNow
+        }),
+      openNow ? "Đã tạo và mở biểu quyết" : "Đã lưu biểu quyết ở dạng nháp"
     );
-    setVoteForm({ title: "", description: "", type: "YES_NO_ABSTAIN", options: "Phương án 1\nPhương án 2" });
+    if (ok) {
+      setVoteForm({
+        title: "",
+        description: "",
+        type: "YES_NO_ABSTAIN",
+        isAnonymous: false,
+        options: ["Phương án 1", "Phương án 2"].join("\n")
+      });
+    }
+  }
+
+  async function openVote(vote) {
+    await run(
+      () => api.put(`/votes/${vote.id}/open`),
+      "Đã mở biểu quyết, người tham dự nhận được thông báo"
+    );
+  }
+
+  async function closeVote(vote) {
+    const ok = await run(() => api.put(`/votes/${vote.id}/close`), "Đã chốt biểu quyết");
+    if (ok) await loadVoteResults(vote.id);
+  }
+
+  async function deleteVote(vote) {
+    await run(() => api.delete(`/votes/${vote.id}`), "Đã xoá biểu quyết nháp");
   }
 
   async function answerVote(voteId, answer) {
-    await run(() => api.post(`/votes/${voteId}/responses`, { answer }), "Đã gửi phiếu biểu quyết");
+    await run(
+      () => api.post(`/votes/${voteId}/responses`, { answer }),
+      `Đã gửi phiếu: ${answer}`
+    );
   }
 
   async function loadVoteResults(voteId) {
     setError("");
     try {
       const res = await api.get(`/votes/${voteId}/results`);
-      setVoteResults((current) => ({ ...current, [voteId]: res.data.data.results }));
+      setVoteResults((current) => ({
+        ...current,
+        [voteId]: { results: res.data.data.results, summary: res.data.data.summary }
+      }));
     } catch (err) {
       setError(err.response?.data?.message || "Không tải được kết quả");
     }
-  }
-
-  async function saveMinutes(event) {
-    event.preventDefault();
-    await run(() => api.post(`/meetings/${id}/minutes`, { content: minutesContent }), "Đã lưu biên bản");
   }
 
   async function createTask(event) {
@@ -426,49 +502,59 @@ export function MeetingDetailPage() {
           <p>{meeting.description || "Không có mô tả"}</p>
           <div className="detail-line">
             <span>{formatDateTime(meeting.start_time)}</span>
-            <span>
-              {meeting.meeting_type === "HYBRID"
-                ? [meeting.room_name, meeting.online_room_name].filter(Boolean).join(" + ")
-                : meeting.room_name || meeting.online_room_name || "Phòng online"}
-            </span>
+            <span>{meetingPlaceLabel(meeting)}</span>
             <StatusPill value={meeting.meeting_type} />
             <StatusPill value={meeting.status} />
           </div>
+          <p className="muted small">
+            {onlineRoomOn
+              ? "Phòng họp trực tuyến đang bật — người dự có thể tham gia từ xa bằng video."
+              : "Cuộc họp tập trung theo chuẩn không giấy tờ. Bật phòng trực tuyến khi có người cần dự từ xa."}
+          </p>
         </div>
         <div className="hero-actions">
-          {livePath && hasOnlineRoom && meeting.status === "ONGOING" && (
+          {livePath && meeting.status === "ONGOING" && (
             <Link className="primary-button" to={livePath}>
               <Video size={16} />
-              Vào phòng đang họp
+              Vào phòng họp
             </Link>
           )}
           {isOrganizer && (
             <>
-            {meetingEditable && (
-              <button className="secondary-button" onClick={() => (editOpen ? setEditOpen(false) : openEdit())}>
-                <Pencil size={16} />
-                {editOpen ? "Đóng chỉnh sửa" : "Chỉnh sửa"}
-              </button>
-            )}
-            {["UPCOMING", "DRAFT"].includes(meeting.status) && (
-              <button
-                className={hasOnlineRoom ? "primary-button" : "secondary-button"}
-                onClick={() => changeMeetingStatus("start")}
-              >
-                {hasOnlineRoom && <Video size={16} />}
-                {hasOnlineRoom ? "Bắt đầu & vào phòng" : "Bắt đầu"}
-              </button>
-            )}
-            {meeting.status === "ONGOING" && (
-              <button className="secondary-button" onClick={() => changeMeetingStatus("finish")}>
-                Kết thúc
-              </button>
-            )}
-            {!["FINISHED", "CANCELLED"].includes(meeting.status) && (
-              <button className="danger-button" onClick={() => changeMeetingStatus("cancel")}>
-                Hủy
-              </button>
-            )}
+              {meetingEditable && meeting.meeting_type !== "ONLINE" && (
+                <button
+                  className="secondary-button"
+                  onClick={() => changeOnlineRoom(!onlineRoomOn)}
+                >
+                  {onlineRoomOn ? <VideoOff size={16} /> : <Video size={16} />}
+                  {onlineRoomOn ? "Tắt phòng trực tuyến" : "Bật phòng trực tuyến"}
+                </button>
+              )}
+              {meetingEditable && (
+                <button
+                  className="secondary-button"
+                  onClick={() => (editOpen ? setEditOpen(false) : openEdit())}
+                >
+                  <Pencil size={16} />
+                  {editOpen ? "Đóng chỉnh sửa" : "Chỉnh sửa"}
+                </button>
+              )}
+              {["UPCOMING", "DRAFT"].includes(meeting.status) && (
+                <button className="primary-button" onClick={() => changeMeetingStatus("start")}>
+                  <Video size={16} />
+                  Bắt đầu &amp; vào phòng
+                </button>
+              )}
+              {meeting.status === "ONGOING" && (
+                <button className="secondary-button" onClick={() => changeMeetingStatus("finish")}>
+                  Kết thúc
+                </button>
+              )}
+              {!["FINISHED", "CANCELLED"].includes(meeting.status) && (
+                <button className="danger-button" onClick={() => changeMeetingStatus("cancel")}>
+                  Hủy
+                </button>
+              )}
             </>
           )}
         </div>
@@ -513,11 +599,11 @@ export function MeetingDetailPage() {
             <label>
               Hình thức
               <select
-                value={editForm.meetingType}
+                value={editForm.meetingMode}
                 onChange={(e) =>
                   setEditForm({
                     ...editForm,
-                    meetingType: e.target.value,
+                    meetingMode: e.target.value,
                     roomId:
                       e.target.value === "ONLINE"
                         ? ""
@@ -525,9 +611,11 @@ export function MeetingDetailPage() {
                   })
                 }
               >
-                <option value="ONLINE">Trực tuyến</option>
-                <option value="HYBRID">Kết hợp</option>
-                <option value="OFFLINE">Tập trung</option>
+                {MEETING_MODES.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.title}
+                  </option>
+                ))}
               </select>
             </label>
             <label>
@@ -535,7 +623,7 @@ export function MeetingDetailPage() {
               <select
                 value={editForm.roomId}
                 onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}
-                disabled={editForm.meetingType === "ONLINE"}
+                disabled={editForm.meetingMode === "ONLINE"}
               >
                 <option value="">-- Chọn phòng --</option>
                 {rooms.map((room) => (
@@ -546,6 +634,14 @@ export function MeetingDetailPage() {
                 ))}
               </select>
             </label>
+            <p className="inline-note wide">
+              <Video size={14} />
+              {editForm.meetingMode === "ONLINE"
+                ? "Cuộc họp trực tuyến luôn có sẵn phòng video."
+                : editForm.onlineRoom
+                  ? "Cuộc họp này đang bật thêm phòng trực tuyến. Tắt bằng nút ở đầu trang."
+                  : "Chưa bật phòng trực tuyến. Bật bằng nút ở đầu trang khi có người cần dự từ xa."}
+            </p>
             {["DRAFT", "UPCOMING"].includes(meeting.status) && (
               <label>
                 Trạng thái
@@ -727,7 +823,7 @@ export function MeetingDetailPage() {
                         </td>
                       )}
                       <td>
-                        <StatusPill value={item.invitation_status} />
+                        <StatusPill value={item.invitation_status} kind="invitation" />
                       </td>
                       <td>
                         <StatusPill value={item.attendance_status || "ABSENT"} />
@@ -798,7 +894,7 @@ export function MeetingDetailPage() {
                       </td>
                       <td>{doc.uploaded_by_name}</td>
                       <td>
-                        <StatusPill value={doc.status} />
+                        <StatusPill value={doc.status} kind="document" />
                       </td>
                       <td className="row-actions">
                         <button className="icon-button" title="Tải xuống" onClick={() => downloadBlob(`/documents/${doc.id}/download`, doc.original_name)}>
@@ -949,7 +1045,7 @@ export function MeetingDetailPage() {
                         <span>
                           {item.presenter_name || "Chưa chọn"} · {item.duration_minutes || 0} phút
                         </span>{" "}
-                        <StatusPill value={item.status} />
+                        <StatusPill value={item.status} kind="agenda" />
                       </div>
                       {isOrganizer && (
                         <div className="row-actions">
@@ -997,63 +1093,130 @@ export function MeetingDetailPage() {
       {activeTab === "attendance" && (
         <section className="panel">
           <div className="section-heading row">
-            <h2>Điểm danh</h2>
-            {isOrganizer && (
-              <button className="secondary-button" onClick={createQr}>
-                <QrCode size={16} />
-                Tạo QR
-              </button>
-            )}
-            {isParticipant && (
-              <button className="primary-button" onClick={() => run(() => api.post(`/meetings/${id}/attendance/checkin`, {}), "Đã điểm danh")}>
-                <Check size={16} />
-                Điểm danh
-              </button>
-            )}
+            <div>
+              <span className="eyebrow">Điểm danh</span>
+              <h2>Thành phần có mặt</h2>
+            </div>
+            <div className="row-actions">
+              {isOrganizer && (
+                <button className="secondary-button" onClick={createQr}>
+                  <QrCode size={16} />
+                  Tạo mã QR điểm danh
+                </button>
+              )}
+              {isParticipant && (
+                <button
+                  className="primary-button"
+                  disabled={meeting.status !== "ONGOING" || checkedIn}
+                  onClick={() =>
+                    run(
+                      () => api.post(`/meetings/${id}/attendance/checkin`, {}),
+                      "Đã điểm danh"
+                    )
+                  }
+                >
+                  <Check size={16} />
+                  {checkedIn ? "Bạn đã điểm danh" : "Điểm danh"}
+                </button>
+              )}
+            </div>
           </div>
+
+          <div className="mini-stats">
+            <div className="mini-stat success">
+              <span>Có mặt</span>
+              <strong>{attendance.present}</strong>
+            </div>
+            <div className="mini-stat warning">
+              <span>Đi muộn</span>
+              <strong>{attendance.late}</strong>
+            </div>
+            <div className="mini-stat">
+              <span>Chưa điểm danh</span>
+              <strong>{attendance.absent}</strong>
+            </div>
+            <div className="mini-stat info">
+              <span>Tỉ lệ tham dự</span>
+              <strong>{percent(attendance.checkedIn, attendance.total)}%</strong>
+            </div>
+          </div>
+
+          <p className="muted small">
+            Bốn cách ghi nhận: quét mã QR tại phòng họp, người dự tự bấm điểm danh khi
+            cuộc họp đang diễn ra, tự động khi vào phòng họp trên hệ thống, hoặc chủ trì
+            ghi nhận thủ công. Vào sau giờ bắt đầu quá 10 phút được tính là đi muộn.
+          </p>
+
           {qr?.qrDataUrl && (
             <div className="qr-box">
-              <img src={qr.qrDataUrl} alt="Attendance QR" />
-              <span>Token hết hạn: {formatDateTime(qr.data.expires_at)}</span>
+              <img src={qr.qrDataUrl} alt="Mã QR điểm danh" />
+              <span>Mã hết hạn lúc: {formatDateTime(qr.data.expires_at)}</span>
             </div>
           )}
+
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Người tham dự</th>
                   <th>Trạng thái</th>
+                  <th>Hình thức</th>
                   <th>Thời gian</th>
-                  {isOrganizer && <th></th>}
+                  {isOrganizer && <th>Chủ trì ghi nhận</th>}
                 </tr>
               </thead>
               <tbody>
                 {participants.map((item) => (
                   <tr key={item.user_id}>
-                    <td>{item.full_name}</td>
+                    <td>
+                      <strong>{item.full_name}</strong>
+                      <span className="table-subtext">{item.email}</span>
+                    </td>
                     <td>
                       <StatusPill value={item.attendance_status || "ABSENT"} />
                     </td>
-                    <td>{formatDateTime(item.checked_in_at)}</td>
+                    <td>{attendanceMethodLabel(item.attendance_method)}</td>
+                    <td>{item.checked_in_at ? formatDateTime(item.checked_in_at) : "-"}</td>
                     {isOrganizer && (
                       <td className="row-actions">
                         <button
-                          className="secondary-button"
+                          className="ghost-button"
+                          disabled={!meetingEditable}
                           onClick={() =>
                             run(() =>
-                              api.put(`/meetings/${id}/attendance/${item.user_id}`, { status: "PRESENT" })
+                              api.put(`/meetings/${id}/attendance/${item.user_id}`, {
+                                status: "PRESENT"
+                              })
                             )
                           }
                         >
                           Có mặt
                         </button>
                         <button
-                          className="secondary-button"
+                          className="ghost-button"
+                          disabled={!meetingEditable}
                           onClick={() =>
-                            run(() => api.put(`/meetings/${id}/attendance/${item.user_id}`, { status: "LATE" }))
+                            run(() =>
+                              api.put(`/meetings/${id}/attendance/${item.user_id}`, {
+                                status: "LATE"
+                              })
+                            )
                           }
                         >
                           Muộn
+                        </button>
+                        <button
+                          className="ghost-button danger"
+                          disabled={!meetingEditable}
+                          onClick={() =>
+                            run(() =>
+                              api.put(`/meetings/${id}/attendance/${item.user_id}`, {
+                                status: "ABSENT"
+                              })
+                            )
+                          }
+                        >
+                          Vắng
                         </button>
                       </td>
                     )}
@@ -1068,87 +1231,103 @@ export function MeetingDetailPage() {
       {activeTab === "votes" && (
         <section className="panel">
           <div className="section-heading">
-            <h2>Biểu quyết</h2>
+            <div>
+              <span className="eyebrow">Biểu quyết</span>
+              <h2>Lấy ý kiến của thành phần dự họp</h2>
+            </div>
           </div>
+
           {isOrganizer && (
             <form className="form-grid four compact-form" onSubmit={createVote}>
-              <label>
-                Câu hỏi
+              <label className="wide">
+                Nội dung cần biểu quyết *
                 <input
                   value={voteForm.title}
                   onChange={(e) => setVoteForm({ ...voteForm, title: e.target.value })}
+                  placeholder="Ví dụ: Thông qua kế hoạch công tác quý IV"
                   required
                 />
               </label>
               <label>
-                Loại
-                <select value={voteForm.type} onChange={(e) => setVoteForm({ ...voteForm, type: e.target.value })}>
-                  <option value="YES_NO_ABSTAIN">YES/NO/ABSTAIN</option>
-                  <option value="MULTIPLE_CHOICE">Nhiều lựa chọn</option>
+                Hình thức phiếu
+                <select
+                  value={voteForm.type}
+                  onChange={(e) => setVoteForm({ ...voteForm, type: e.target.value })}
+                >
+                  <option value="YES_NO_ABSTAIN">Tán thành / Không / Không ý kiến</option>
+                  <option value="MULTIPLE_CHOICE">Chọn một trong nhiều phương án</option>
                 </select>
               </label>
+              <label className="perm-toggle self-end">
+                <input
+                  type="checkbox"
+                  checked={voteForm.isAnonymous}
+                  onChange={(e) =>
+                    setVoteForm({ ...voteForm, isAnonymous: e.target.checked })
+                  }
+                />
+                Biểu quyết kín (không lưu ai chọn gì)
+              </label>
               <label className="wide">
-                Mô tả
+                Mô tả thêm
                 <input
                   value={voteForm.description}
-                  onChange={(e) => setVoteForm({ ...voteForm, description: e.target.value })}
+                  onChange={(e) =>
+                    setVoteForm({ ...voteForm, description: e.target.value })
+                  }
                 />
               </label>
               {voteForm.type === "MULTIPLE_CHOICE" && (
                 <label className="wide">
                   Phương án, mỗi dòng một lựa chọn
-                  <textarea value={voteForm.options} onChange={(e) => setVoteForm({ ...voteForm, options: e.target.value })} />
+                  <textarea
+                    value={voteForm.options}
+                    onChange={(e) => setVoteForm({ ...voteForm, options: e.target.value })}
+                  />
                 </label>
               )}
-              <button className="primary-button">
-                <Vote size={16} />
-                Tạo vote
-              </button>
+              <div className="row-actions start wide">
+                <button className="secondary-button" type="submit">
+                  <Save size={16} />
+                  Lưu nháp
+                </button>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={(event) => createVote(event, true)}
+                >
+                  <Vote size={16} />
+                  Tạo &amp; mở lấy ý kiến
+                </button>
+              </div>
             </form>
           )}
+
           {asArray(meeting.votes).length === 0 ? (
-            <EmptyState title="Chưa có biểu quyết" />
+            <EmptyState
+              title="Chưa có nội dung biểu quyết"
+              description={
+                isOrganizer
+                  ? "Tạo biểu quyết ở trên, lưu nháp trước rồi mở lấy ý kiến đúng lúc cần."
+                  : "Chủ trì sẽ mở biểu quyết khi cần lấy ý kiến."
+              }
+            />
           ) : (
-            <div className="vote-list">
+            <div className="vote-board">
               {meeting.votes.map((vote) => (
-                <article key={vote.id} className="vote-row">
-                  <div>
-                    <h3>{vote.title}</h3>
-                    <p>{vote.description}</p>
-                    <StatusPill value={vote.status} />
-                    <span className="muted"> {vote.response_count} phiếu</span>
-                  </div>
-                  {isParticipant && vote.status === "OPEN" && !vote.my_answer && (
-                    <div className="option-row">
-                      {voteOptions(vote).map((option) => (
-                        <button key={option} className="secondary-button" onClick={() => answerVote(vote.id, option)}>
-                          {option}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {vote.my_answer && <div className="muted">Bạn đã chọn: {vote.my_answer}</div>}
-                  <div className="row-actions">
-                    {isOrganizer && vote.status === "OPEN" && (
-                      <button className="secondary-button" onClick={() => run(() => api.put(`/votes/${vote.id}/close`))}>
-                        Đóng vote
-                      </button>
-                    )}
-                    <button className="secondary-button" onClick={() => loadVoteResults(vote.id)}>
-                      Kết quả
-                    </button>
-                  </div>
-                  {voteResults[vote.id] && (
-                    <div className="result-bars">
-                      {voteResults[vote.id].map((item) => (
-                        <div key={item.answer}>
-                          <span>{item.answer}</span>
-                          <strong>{item.count}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </article>
+                <VoteCard
+                  key={vote.id}
+                  vote={vote}
+                  result={voteResults[vote.id]}
+                  canManage={isOrganizer}
+                  canVote={isParticipant}
+                  participantCount={participants.length}
+                  onOpen={openVote}
+                  onClose={closeVote}
+                  onAnswer={(item, answer) => answerVote(item.id, answer)}
+                  onResults={loadVoteResults}
+                  onDelete={deleteVote}
+                />
               ))}
             </div>
           )}
@@ -1157,49 +1336,57 @@ export function MeetingDetailPage() {
 
       {activeTab === "minutes" && (
         <section className="panel">
-          <div className="section-heading row">
-            <h2>Biên bản</h2>
-            {meeting.minutes && (
-              <button className="secondary-button" onClick={() => downloadBlob(`/minutes/${meeting.minutes.id}/pdf`, `minutes-${meeting.id}.pdf`)}>
-                <Download size={16} />
-                PDF
-              </button>
-            )}
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Biên bản</span>
+              <h2>Biên bản điện tử có ký số</h2>
+            </div>
           </div>
-          {isOrganizer ? (
-            <form className="form-grid" onSubmit={saveMinutes}>
-              <textarea
-                className="minutes-editor"
-                value={minutesContent}
-                onChange={(e) => setMinutesContent(e.target.value)}
-                placeholder="Nhập nội dung biên bản..."
-                required
-              />
-              <div className="row-actions start">
-                <button className="primary-button">
-                  <Save size={16} />
-                  Lưu biên bản
-                </button>
-                {meeting.minutes && (
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => run(() => api.put(`/minutes/${meeting.minutes.id}/publish`), "Đã công bố biên bản")}
-                  >
-                    <Send size={16} />
-                    Công bố
-                  </button>
-                )}
-              </div>
-              {meeting.minutes && <StatusPill value={meeting.minutes.status} />}
-            </form>
-          ) : meeting.minutes ? (
-            <article className="minutes-view">
-              <StatusPill value={meeting.minutes.status} />
-              <p>{meeting.minutes.content}</p>
-            </article>
+          <MinutesPanel
+            meetingId={id}
+            isOrganizer={isOrganizer}
+            canSign={canSignMinutes}
+            onNotice={setMessage}
+            onError={setError}
+          />
+        </section>
+      )}
+
+      {activeTab === "audit" && isOrganizer && (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Nhật ký truy vết</span>
+              <h2>Ai đã làm gì với cuộc họp này</h2>
+            </div>
+          </div>
+          {auditLogs.length === 0 ? (
+            <EmptyState title="Chưa có thao tác nào được ghi nhận" />
           ) : (
-            <EmptyState title="Biên bản chưa được công bố" />
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Thời điểm</th>
+                    <th>Người thao tác</th>
+                    <th>Hành động</th>
+                    <th>Chi tiết</th>
+                    <th>IP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditLogs.map((log) => (
+                    <tr key={log.id}>
+                      <td className="nowrap">{formatDateTime(log.created_at)}</td>
+                      <td>{log.actor_name || "Khách"}</td>
+                      <td>{log.action}</td>
+                      <td>{log.description || "-"}</td>
+                      <td className="nowrap">{log.ip_address || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
       )}

@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS meetings (
   online_provider VARCHAR(50) NOT NULL DEFAULT 'LIVEKIT',
   online_room_name VARCHAR(255),
   online_room_url TEXT,
+  online_enabled_at TIMESTAMPTZ,
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ,
@@ -88,7 +89,7 @@ CREATE TABLE IF NOT EXISTS meeting_participants (
   CONSTRAINT meeting_participants_role_check CHECK (role_in_meeting IN ('CHAIRMAN', 'SECRETARY', 'MEMBER')),
   CONSTRAINT meeting_participants_invitation_check CHECK (invitation_status IN ('PENDING', 'ACCEPTED', 'DECLINED')),
   CONSTRAINT meeting_participants_attendance_check CHECK (attendance_status IS NULL OR attendance_status IN ('PRESENT', 'ABSENT', 'LATE')),
-  CONSTRAINT meeting_participants_method_check CHECK (attendance_method IS NULL OR attendance_method IN ('QR', 'MANUAL'))
+  CONSTRAINT meeting_participants_method_check CHECK (attendance_method IS NULL OR attendance_method IN ('QR', 'MANUAL', 'JOIN_ROOM'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_meeting_participants_user ON meeting_participants(user_id);
@@ -106,6 +107,9 @@ CREATE TABLE IF NOT EXISTS documents (
   status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
   is_presenting BOOLEAN NOT NULL DEFAULT FALSE,
   current_page INTEGER NOT NULL DEFAULT 1,
+  ai_summary TEXT,
+  ai_summary_model VARCHAR(80),
+  ai_summary_updated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ,
   deleted_at TIMESTAMPTZ,
@@ -226,6 +230,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
   sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   message_type VARCHAR(30) NOT NULL DEFAULT 'TEXT',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -233,6 +238,18 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_meeting ON chat_messages(meeting_id, created_at);
+-- Ghi chú chung gắn với từng tài liệu, hiển thị trong hộp làm việc tài liệu của phòng họp.
+CREATE TABLE IF NOT EXISTS document_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID NOT NULL UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
+  meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  content TEXT,
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_notes_meeting ON document_notes(meeting_id);
 
 CREATE TABLE IF NOT EXISTS meeting_notes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -285,6 +302,87 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE is_read = FALSE;
 
+-- ============================================================
+-- Nhật ký truy vết: ai làm gì, lúc nào, trên đối tượng nào.
+-- Ghi kèm tên người thao tác tại thời điểm đó để log vẫn đọc
+-- được sau khi tài khoản bị xoá.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  actor_name VARCHAR(150),
+  actor_role VARCHAR(30),
+  action VARCHAR(60) NOT NULL,
+  entity_type VARCHAR(40),
+  entity_id UUID,
+  meeting_id UUID REFERENCES meetings(id) ON DELETE SET NULL,
+  description TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ip_address VARCHAR(60),
+  user_agent TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_meeting ON audit_logs(meeting_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action, created_at DESC);
+
+-- ============================================================
+-- Ký số biên bản.
+-- Mỗi người có một cặp khoá RSA sinh sẵn khi ký lần đầu.
+-- Khoá riêng lưu trong database (giới hạn của đồ án: hệ thống
+-- thật đặt khoá trong USB token hoặc HSM).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS user_signing_keys (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  public_key TEXT NOT NULL,
+  private_key TEXT NOT NULL,
+  algorithm VARCHAR(40) NOT NULL DEFAULT 'RSA-SHA256',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS minutes_signatures (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  minutes_id UUID NOT NULL REFERENCES minutes(id) ON DELETE CASCADE,
+  signer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  signer_name VARCHAR(150) NOT NULL,
+  signer_title VARCHAR(100) NOT NULL,
+  content_hash CHAR(64) NOT NULL,
+  signature TEXT NOT NULL,
+  algorithm VARCHAR(40) NOT NULL DEFAULT 'RSA-SHA256',
+  signed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (minutes_id, signer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_minutes_signatures_minutes ON minutes_signatures(minutes_id);
+
+-- ============================================================
+-- Hỏi đáp tài liệu bằng AI, lưu lại để cả phòng họp cùng xem.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS document_questions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  asked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  asked_by_name VARCHAR(150),
+  question TEXT NOT NULL,
+  answer TEXT,
+  model VARCHAR(80),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_questions_document
+  ON document_questions(document_id, created_at);
+
+-- Biên bản: mốc tự sinh, mã tra cứu công khai và hash toàn vẹn.
+ALTER TABLE minutes ADD COLUMN IF NOT EXISTS generated_at TIMESTAMPTZ;
+ALTER TABLE minutes ADD COLUMN IF NOT EXISTS content_hash CHAR(64);
+ALTER TABLE minutes ADD COLUMN IF NOT EXISTS verification_code VARCHAR(24);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_minutes_verification_code
+  ON minutes(verification_code) WHERE verification_code IS NOT NULL;
+
 ALTER TABLE departments ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
@@ -294,6 +392,7 @@ ALTER TABLE meetings ADD COLUMN IF NOT EXISTS online_room_name VARCHAR(255);
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS online_room_url TEXT;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
 ALTER TABLE meetings ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS online_enabled_at TIMESTAMPTZ;
 ALTER TABLE meetings ALTER COLUMN room_id DROP NOT NULL;
 ALTER TABLE meeting_participants ADD COLUMN IF NOT EXISTS can_share_screen BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE meeting_participants ADD COLUMN IF NOT EXISTS can_upload_document BOOLEAN NOT NULL DEFAULT FALSE;
@@ -303,6 +402,11 @@ ALTER TABLE meeting_participants ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ;
 ALTER TABLE meeting_participants ADD COLUMN IF NOT EXISTS is_online BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE meeting_participants ADD COLUMN IF NOT EXISTS is_hand_raised BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_presenting BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS ai_summary TEXT;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS ai_summary_model VARCHAR(80);
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS ai_summary_updated_at TIMESTAMPTZ;
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS document_id UUID REFERENCES documents(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_chat_messages_document ON chat_messages(document_id, created_at);
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS current_page INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS related_document_id UUID REFERENCES documents(id) ON DELETE SET NULL;
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'PENDING';
@@ -317,12 +421,16 @@ DO $$
 BEGIN
   ALTER TABLE meetings DROP CONSTRAINT IF EXISTS meetings_type_check;
   ALTER TABLE meetings ADD CONSTRAINT meetings_type_check CHECK (meeting_type IN ('ONLINE', 'OFFLINE', 'HYBRID'));
-  UPDATE meetings SET online_provider = 'LIVEKIT' WHERE online_provider = 'JITSI';
-  UPDATE meetings SET online_room_url = NULL WHERE online_room_url LIKE '%jit.si%';
+  -- Phải gỡ ràng buộc cũ trước khi đổi dữ liệu JITSI -> LIVEKIT, nếu không bản ghi mới vi phạm ràng buộc đang tồn tại.
   ALTER TABLE meetings DROP CONSTRAINT IF EXISTS meetings_provider_check;
+  UPDATE meetings SET online_provider = 'LIVEKIT' WHERE online_provider NOT IN ('LIVEKIT', 'CUSTOM');
+  UPDATE meetings SET online_room_url = NULL WHERE online_room_url LIKE '%jit.si%';
   ALTER TABLE meetings ADD CONSTRAINT meetings_provider_check CHECK (online_provider IN ('LIVEKIT', 'CUSTOM'));
   ALTER TABLE votes DROP CONSTRAINT IF EXISTS votes_status_check;
   ALTER TABLE votes ADD CONSTRAINT votes_status_check CHECK (status IN ('DRAFT', 'OPEN', 'CLOSED'));
+  ALTER TABLE meeting_participants DROP CONSTRAINT IF EXISTS meeting_participants_method_check;
+  ALTER TABLE meeting_participants ADD CONSTRAINT meeting_participants_method_check CHECK (attendance_method IS NULL OR attendance_method IN ('QR', 'MANUAL', 'JOIN_ROOM'));
+  UPDATE meetings SET online_enabled_at = COALESCE(online_enabled_at, updated_at, created_at) WHERE meeting_type IN ('ONLINE', 'HYBRID') AND online_room_name IS NOT NULL;
   ALTER TABLE agenda_items DROP CONSTRAINT IF EXISTS agenda_status_check;
   ALTER TABLE agenda_items ADD CONSTRAINT agenda_status_check CHECK (status IN ('PENDING', 'CURRENT', 'DONE'));
 END $$;

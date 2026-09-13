@@ -24,6 +24,42 @@ services:
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
 
+  # Giao dien web xem database dang bang, giong phpMyAdmin. Nhe va mo nhanh.
+  # Chay: docker compose --profile tools up -d adminer   ->  http://localhost:8080
+  adminer:
+    image: adminer:latest
+    container_name: paperless-meeting-adminer
+    profiles: ["tools"]
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: pepa-linha
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+
+  # pgAdmin: day du hon, co ca so do quan he (ERD) de trinh bay khi bao ve.
+  # Chay: docker compose --profile tools up -d pgadmin    ->  http://localhost:8081
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: paperless-meeting-pgadmin
+    profiles: ["tools"]
+    environment:
+      # SERVER_MODE=False -> che do desktop, mo trinh duyet la vao thang khong can dang nhap.
+      # Email/password ben duoi image van bat buoc phai co nhung khong dung de dang nhap.
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: "123456"
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "8081:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./scripts/pgadmin-servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      - postgres
+
 volumes:
   postgres_data:
+  pgadmin_data:
 

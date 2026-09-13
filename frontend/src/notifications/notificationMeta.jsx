@@ -9,6 +9,7 @@ import {
   PlayCircle,
   Timer,
   UserMinus,
+  Video,
   Vote
 } from "lucide-react";
 
@@ -20,6 +21,8 @@ const META = {
   MEETING_STARTED: { icon: PlayCircle, label: "Bắt đầu họp" },
   MEETING_FINISHED: { icon: ListChecks, label: "Kết thúc họp" },
   MEETING_REMINDER: { icon: Timer, label: "Nhắc lịch" },
+  MEETING_ONLINE_ENABLED: { icon: Video, label: "Phòng trực tuyến" },
+  MEETING_ONLINE_DISABLED: { icon: Video, label: "Phòng trực tuyến" },
   PARTICIPANT_REMOVED: { icon: UserMinus, label: "Thay đổi thành phần" },
   INVITATION_RESPONSE: { icon: CheckSquare, label: "Phản hồi lời mời" },
   DOCUMENT_UPLOADED: { icon: FileText, label: "Tài liệu mới" },

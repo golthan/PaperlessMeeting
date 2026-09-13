@@ -5,6 +5,7 @@ import { errorHandler, notFoundHandler } from "./middlewares/error.middleware.js
 import { meetingAgendaRouter, agendaRouter } from "./modules/agenda/agenda.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { attendanceRouter } from "./modules/attendance/attendance.routes.js";
+import { auditRouter, meetingAuditRouter } from "./modules/audit/audit.routes.js";
 import { chatRouter } from "./modules/chat/chat.routes.js";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes.js";
 import { departmentsRouter } from "./modules/departments/departments.routes.js";
@@ -15,6 +16,7 @@ import {
 import { meetingsRouter } from "./modules/meetings/meetings.routes.js";
 import { notificationsRouter } from "./modules/notifications/notifications.routes.js";
 import { meetingMinutesRouter, minutesRouter } from "./modules/minutes/minutes.routes.js";
+import { publicVerifyRouter } from "./modules/minutes/verify.routes.js";
 import { personalNotesRouter, publicNotesRouter } from "./modules/notes/notes.routes.js";
 import {
   invitationRouter,
@@ -39,6 +41,8 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", service: "paperless-meeting-backend" });
 });
 
+// Tra cuu bien ban bang ma QR: khong yeu cau dang nhap.
+app.use("/api/public", publicVerifyRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/departments", departmentsRouter);
@@ -50,6 +54,8 @@ app.use("/api/documents", documentsRouter);
 app.use("/api/meetings/:meetingId/agenda", meetingAgendaRouter);
 app.use("/api/agenda", agendaRouter);
 app.use("/api/meetings/:meetingId/attendance", attendanceRouter);
+app.use("/api/meetings/:meetingId/audit-logs", meetingAuditRouter);
+app.use("/api/audit-logs", auditRouter);
 app.use("/api/meetings/:meetingId/votes", meetingVotesRouter);
 app.use("/api/votes", votesRouter);
 app.use("/api/meetings/:meetingId/chat", chatRouter);

@@ -17,6 +17,46 @@ export function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+/** Cuộc họp này có phòng video hay không. */
+export function hasOnlineRoom(meeting) {
+  return Boolean(meeting) && meeting.meeting_type !== "OFFLINE";
+}
+
+/** Địa điểm rút gọn: phòng vật lý, phòng trực tuyến hoặc cả hai. */
+export function meetingPlaceLabel(meeting) {
+  if (!meeting) return "-";
+  if (meeting.meeting_type === "ONLINE") return "Phòng họp trực tuyến";
+  const room = meeting.room_name || "Chưa chọn phòng";
+  return meeting.meeting_type === "HYBRID" ? room + " + phòng trực tuyến" : room;
+}
+
+/** Tổng hợp điểm danh của một cuộc họp. */
+export function attendanceSummary(participants) {
+  const list = asArray(participants);
+  const present = list.filter((item) => item.attendance_status === "PRESENT").length;
+  const late = list.filter((item) => item.attendance_status === "LATE").length;
+  return {
+    total: list.length,
+    present,
+    late,
+    checkedIn: present + late,
+    absent: list.length - present - late
+  };
+}
+
+export function percent(count, total) {
+  if (!total) return 0;
+  return Math.round((Number(count || 0) / total) * 100);
+}
+
+/** Cách một người được ghi nhận điểm danh. */
+export function attendanceMethodLabel(method) {
+  if (method === "QR") return "Quét QR";
+  if (method === "JOIN_ROOM") return "Vào phòng họp";
+  if (method === "MANUAL") return "Chủ trì ghi nhận";
+  return "-";
+}
+
 /** "5 phút trước" — dùng cho danh sách thông báo. */
 export function timeAgo(value) {
   if (!value) return "";

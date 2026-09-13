@@ -18,6 +18,7 @@
     "android": "npm --workspace mobile run android",
     "android:emu": "powershell -ExecutionPolicy Bypass -File scripts/start-android.ps1",
     "seed": "npm --workspace backend run seed",
+    "migrate": "npm --workspace backend run migrate",
     "check": "npm --workspace backend run check && npm --workspace frontend run build && npm --workspace mobile run export:android"
   }
 }

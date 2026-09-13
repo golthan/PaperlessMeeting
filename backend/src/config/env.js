@@ -16,5 +16,9 @@ export const env = {
   livekitApiSecret:
     process.env.LIVEKIT_API_SECRET || "paperless_livekit_dev_secret_0123456789",
   // De trong: client tu suy ra ws://<hostname dang mo trang>:7880
-  livekitWsUrl: process.env.LIVEKIT_WS_URL || ""
+  livekitWsUrl: process.env.LIVEKIT_WS_URL || "",
+  // Tro ly AI cho tai lieu. Khong dat khoa thi tinh nang AI bao loi ro rang,
+  // phan con lai cua he thong van chay binh thuong.
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+  aiModel: process.env.AI_MODEL || "claude-opus-5"
 };

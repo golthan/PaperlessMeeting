@@ -63,7 +63,49 @@ const toneMap = {
   LATE: "warning",
   HIGH: "danger",
   MEDIUM: "warning",
-  LOW: "neutral"
+  LOW: "neutral",
+  ONLINE: "success",
+  OFFLINE: "neutral",
+  HYBRID: "info",
+  CURRENT: "info",
+  SECRETARY: "info",
+  MEMBER: "neutral"
+};
+
+/** Nhãn tiếng Việt cho từng trạng thái để người dùng không phải đọc mã enum. */
+const labelMap = {
+  ACTIVE: "Đang hoạt động",
+  LOCKED: "Đã khoá",
+  DRAFT: "Nháp",
+  UPCOMING: "Sắp diễn ra",
+  ONGOING: "Đang họp",
+  FINISHED: "Đã kết thúc",
+  CANCELLED: "Đã huỷ",
+  PENDING: "Chờ xử lý",
+  ACCEPTED: "Đã nhận lời",
+  DECLINED: "Từ chối",
+  APPROVED: "Đã duyệt",
+  REJECTED: "Bị từ chối",
+  OPEN: "Đang mở",
+  CLOSED: "Đã chốt",
+  PUBLISHED: "Đã ban hành",
+  CURRENT: "Đang trình bày",
+  TODO: "Chưa làm",
+  IN_PROGRESS: "Đang làm",
+  DONE: "Hoàn thành",
+  OVERDUE: "Quá hạn",
+  PRESENT: "Có mặt",
+  ABSENT: "Vắng mặt",
+  LATE: "Đi muộn",
+  ONLINE: "Trực tuyến",
+  OFFLINE: "Tập trung",
+  HYBRID: "Tập trung + trực tuyến",
+  CHAIRMAN: "Chủ trì",
+  SECRETARY: "Thư ký",
+  MEMBER: "Thành viên",
+  HIGH: "Ưu tiên cao",
+  MEDIUM: "Ưu tiên vừa",
+  LOW: "Ưu tiên thấp"
 };
 
 function initials(value) {
@@ -395,13 +437,13 @@ export function ErrorState({ message }) {
   );
 }
 
-export function StatusPill({ value }) {
+export function StatusPill({ value, label }) {
   const tone = toneMap[value] || "neutral";
   return (
     <View style={[styles.pill, styles[`pill_${tone}`]]}>
       <View style={[styles.pillDot, styles[`pillDot_${tone}`]]} />
       <Text style={[styles.pillText, styles[`pillText_${tone}`]]}>
-        {value || "-"}
+        {label || labelMap[value] || value || "-"}
       </Text>
     </View>
   );

@@ -109,7 +109,7 @@ async function run() {
     `INSERT INTO meetings
        (title, description, meeting_type, start_time, end_time, room_id, organizer_id,
         status, online_provider, online_room_name, online_room_url, notes)
-     VALUES ($1, $2, 'HYBRID', $3, $4, $5, $6, 'UPCOMING', 'LIVEKIT', $7, $8, $9)
+     VALUES ($1, $2, 'OFFLINE', $3, $4, $5, $6, 'UPCOMING', 'LIVEKIT', $7, $8, $9)
      RETURNING *`,
     [
       "Hop trien khai ke hoach thang",
@@ -118,9 +118,9 @@ async function run() {
       tomorrowEnd,
       rooms.a101.id,
       users.organizer.id,
-      "paperless-meeting-seed-monthly-plan",
       null,
-      "Seed demo meeting"
+      null,
+      "Seed demo meeting - hop tap trung, co the bat phong truc tuyen khi can"
     ]
   );
   const meeting = meetingRows[0];
@@ -180,8 +180,8 @@ async function run() {
   );
 
   await pool.query(
-    `INSERT INTO votes (meeting_id, title, description, type, options, created_by)
-     VALUES ($1, 'Thong qua ke hoach thang', 'Bieu quyet thong qua ke hoach', 'YES_NO_ABSTAIN', '["YES","NO","ABSTAIN"]', $2)`,
+    `INSERT INTO votes (meeting_id, title, description, type, options, status, created_by)
+     VALUES ($1, 'Thong qua ke hoach thang', 'Bieu quyet thong qua ke hoach', 'YES_NO_ABSTAIN', '["YES","NO","ABSTAIN"]', 'DRAFT', $2)`,
     [meeting.id, users.organizer.id]
   );
 
