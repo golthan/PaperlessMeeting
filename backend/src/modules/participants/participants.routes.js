@@ -12,6 +12,7 @@ import {
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
 import { NOTIFICATION_TYPES, notifyUsers } from "../notifications/notifications.service.js";
+import { AUDIT_ACTIONS, writeAuditLog } from "../audit/audit.service.js";
 
 export const participantsRouter = express.Router({ mergeParams: true });
 export const invitationRouter = express.Router({ mergeParams: true });
@@ -124,6 +125,15 @@ participantsRouter.post(
       }
     );
 
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.PARTICIPANT_ADD,
+      entityType: "MEETING",
+      entityId: meeting.id,
+      meetingId: meeting.id,
+      description: `Thêm ${inserted.length} người vào cuộc họp "${meeting.title}"`,
+      metadata: { userIds: inserted.map((row) => row.user_id) }
+    });
+
     res.status(201).json({ data: inserted });
   })
 );
@@ -151,6 +161,15 @@ participantsRouter.delete(
       title: `Bạn không còn trong cuộc họp: ${meeting.title}`,
       message: `${req.user.full_name} đã gỡ bạn khỏi danh sách tham dự.`,
       excludeUserId: req.user.id
+    });
+
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.PARTICIPANT_REMOVE,
+      entityType: "MEETING",
+      entityId: meeting.id,
+      meetingId: meeting.id,
+      description: `Gỡ một người khỏi cuộc họp "${meeting.title}"`,
+      metadata: { targetUserId: req.params.userId }
     });
 
     res.status(204).send();

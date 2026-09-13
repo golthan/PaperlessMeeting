@@ -31,6 +31,8 @@ const TYPE_META = {
   MEETING_STARTED: { icon: "play-circle-outline", label: "Bắt đầu họp" },
   MEETING_FINISHED: { icon: "flag-outline", label: "Kết thúc họp" },
   MEETING_REMINDER: { icon: "alarm-outline", label: "Nhắc lịch" },
+  MEETING_ONLINE_ENABLED: { icon: "videocam-outline", label: "Phòng trực tuyến" },
+  MEETING_ONLINE_DISABLED: { icon: "videocam-off-outline", label: "Phòng trực tuyến" },
   PARTICIPANT_REMOVED: { icon: "person-remove-outline", label: "Thành phần" },
   INVITATION_RESPONSE: { icon: "checkmark-done-outline", label: "Phản hồi" },
   DOCUMENT_UPLOADED: { icon: "document-attach-outline", label: "Tài liệu" },

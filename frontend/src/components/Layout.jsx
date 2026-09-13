@@ -7,6 +7,7 @@ import {
   LogOut,
   Menu,
   Network,
+  ScrollText,
   Users,
   X
 } from "lucide-react";
@@ -24,6 +25,7 @@ const navByRole = {
     ["Phòng ban", "/admin/departments", Network],
     ["Phòng họp", "/admin/rooms", DoorOpen],
     ["Cuộc họp", "/admin/meetings", CalendarDays],
+    ["Nhật ký truy vết", "/admin/audit-logs", ScrollText],
     ["Thông báo", "/admin/notifications", Bell]
   ],
   ORGANIZER: [

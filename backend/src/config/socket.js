@@ -2,6 +2,7 @@ import { Server } from "socket.io";
 import { pool } from "./db.js";
 import { env } from "./env.js";
 import { verifyToken } from "../utils/jwt.js";
+import { autoCheckInOnJoin } from "../modules/attendance/attendance.service.js";
 
 let ioInstance = null;
 
@@ -103,6 +104,7 @@ export function initSocket(httpServer) {
         socket.join(roomName(meetingId));
         socket.meetingId = meetingId;
 
+        let autoAttendance = null;
         if (socket.user.role !== "ADMIN") {
           await pool.query(
             `UPDATE meeting_participants
@@ -113,6 +115,8 @@ export function initSocket(httpServer) {
              WHERE meeting_id = $1 AND user_id = $2`,
             [meetingId, socket.user.id]
           );
+          // Vào phòng họp khi đang diễn ra thì tính là đã điểm danh.
+          autoAttendance = await autoCheckInOnJoin(meeting, socket.user.id);
         }
 
         await pool.query(
@@ -131,7 +135,15 @@ export function initSocket(httpServer) {
           userId: socket.user.id,
           isOnline: true
         });
-        callback?.({ ok: true });
+        if (autoAttendance) {
+          meetingNamespace.to(roomName(meetingId)).emit("attendance_updated", {
+            meetingId,
+            userId: socket.user.id,
+            status: autoAttendance.status,
+            method: autoAttendance.method
+          });
+        }
+        callback?.({ ok: true, autoAttendance });
       } catch (error) {
         callback?.({ ok: false, message: error.message });
       }
@@ -143,18 +155,27 @@ export function initSocket(httpServer) {
       callback?.({ ok: true });
     });
 
-    socket.on("send_chat_message", async ({ meetingId, content }, callback) => {
+    // documentId != null: tin nhắn thuộc phần thảo luận của một tài liệu.
+    socket.on("send_chat_message", async ({ meetingId, content, documentId }, callback) => {
       try {
         const meeting = await canAccessMeeting(socket.user, meetingId);
         if (!meeting) throw new Error("Cannot send chat to this meeting");
         const cleanContent = sanitizeText(content);
         if (!cleanContent) throw new Error("Message is empty");
 
+        if (documentId) {
+          const document = await pool.query(
+            "SELECT id FROM documents WHERE id = $1 AND meeting_id = $2 AND deleted_at IS NULL",
+            [documentId, meetingId]
+          );
+          if (!document.rows[0]) throw new Error("Tài liệu không thuộc cuộc họp này");
+        }
+
         const { rows } = await pool.query(
-          `INSERT INTO chat_messages (meeting_id, sender_id, content)
-           VALUES ($1, $2, $3)
+          `INSERT INTO chat_messages (meeting_id, sender_id, document_id, content)
+           VALUES ($1, $2, $3, $4)
            RETURNING *`,
-          [meetingId, socket.user.id, cleanContent]
+          [meetingId, socket.user.id, documentId || null, cleanContent]
         );
 
         const message = {

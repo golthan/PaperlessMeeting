@@ -1,3 +1,4 @@
+import { TrackSource } from "@livekit/protocol";
 import { AccessToken } from "livekit-server-sdk";
 import { env } from "../config/env.js";
 
@@ -25,8 +26,9 @@ export async function createLiveRoomToken({ roomName, user, permissions }) {
     canPublish: permissions.canSpeak !== false,
     canPublishData: true
   };
+  // canPublishSources nhận enum TrackSource của LiveKit, truyền chuỗi thường sẽ làm hỏng token.
   if (!permissions.canShareScreen) {
-    grant.canPublishSources = ["camera", "microphone"];
+    grant.canPublishSources = [TrackSource.CAMERA, TrackSource.MICROPHONE];
   }
   token.addGrant(grant);
 

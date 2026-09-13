@@ -32,8 +32,16 @@ import {
   assertMeetingOrganizer,
   hasRoomConflict
 } from "./meetingAccess.js";
+import { AUDIT_ACTIONS, writeAuditLog } from "../audit/audit.service.js";
 
 export const meetingsRouter = express.Router();
+
+/** Nhãn tiếng Việt của hình thức họp, dùng trong nội dung thông báo. */
+const MEETING_TYPE_LABELS = {
+  OFFLINE: "họp tập trung",
+  ONLINE: "họp trực tuyến",
+  HYBRID: "tập trung + phòng trực tuyến"
+};
 
 meetingsRouter.use(authenticate);
 
@@ -70,13 +78,14 @@ async function getMeetingDetail(user, meetingId) {
       [meetingId]
     ),
     pool.query(
-      `SELECT v.*, COUNT(vr.id)::int AS response_count
+      `SELECT v.*, COUNT(vr.id)::int AS response_count, mine.answer AS my_answer
        FROM votes v
        LEFT JOIN vote_responses vr ON vr.vote_id = v.id
+       LEFT JOIN vote_responses mine ON mine.vote_id = v.id AND mine.user_id = $2
        WHERE v.meeting_id = $1
-       GROUP BY v.id
+       GROUP BY v.id, mine.answer
        ORDER BY v.created_at DESC`,
-      [meetingId]
+      [meetingId, user.id]
     ),
     pool.query(
       `SELECT *
@@ -206,7 +215,7 @@ meetingsRouter.get(
   asyncHandler(async (req, res) => {
     const meeting = await assertMeetingAccess(req.user, req.params.id);
     if (["CANCELLED", "FINISHED"].includes(meeting.status)) {
-      throw badRequest("Live room is closed for this meeting");
+      throw badRequest("Phòng họp đã đóng vì cuộc họp kết thúc hoặc bị huỷ");
     }
 
     const participant = await pool.query(
@@ -254,6 +263,8 @@ meetingsRouter.get(
         roomUrl: roomName ? buildLiveRoomUrl(meeting.id) : null,
         livekitUrl: env.livekitWsUrl || null,
         livekitToken,
+        onlineRoomEnabled: Boolean(roomName),
+        onlineEnabledAt: meeting.online_enabled_at || null,
         permissions
       }
     });
@@ -333,7 +344,7 @@ meetingsRouter.post(
     assertEnum(onlineProvider, ONLINE_PROVIDERS, "online provider");
 
     if (["OFFLINE", "HYBRID"].includes(meetingType) && !roomId) {
-      throw badRequest("Room is required for offline or hybrid meetings");
+      throw badRequest("Cuộc họp tập trung cần chọn phòng họp vật lý");
     }
 
     if (!Array.isArray(participants) || !Array.isArray(agenda)) {
@@ -353,7 +364,7 @@ meetingsRouter.post(
       (person) => person.roleInMeeting === "SECRETARY"
     ).length;
     if (secretaryCount > 1) {
-      throw badRequest("A meeting can only have one secretary");
+      throw badRequest("Mỗi cuộc họp chỉ có một thư ký");
     }
 
     for (const item of agenda) {
@@ -369,12 +380,12 @@ meetingsRouter.post(
       const room = await pool.query("SELECT * FROM rooms WHERE id = $1", [roomId]);
       if (!room.rows[0]) throw notFound("Room not found");
       if (room.rows[0].status !== "AVAILABLE") {
-        throw badRequest("Room is unavailable");
+        throw badRequest("Phòng họp này đang không khả dụng");
       }
 
       const conflict = await hasRoomConflict(roomId, startTime, endTime);
       if (conflict) {
-        throw badRequest("Room schedule conflict", { conflict });
+        throw badRequest("Phòng họp đã có lịch trùng khung giờ này", { conflict });
       }
     }
 
@@ -474,6 +485,15 @@ meetingsRouter.post(
       }
     );
 
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.MEETING_CREATE,
+      entityType: "MEETING",
+      entityId: meeting.id,
+      meetingId: meeting.id,
+      description: `Tạo cuộc họp "${meeting.title}" (${meeting.meeting_type})`,
+      metadata: { participants: participantList.length, agenda: agenda.length }
+    });
+
     res.status(201).json({ data: meeting });
   })
 );
@@ -484,7 +504,7 @@ meetingsRouter.put(
   asyncHandler(async (req, res) => {
     const meeting = await assertMeetingOrganizer(req.user, req.params.id);
     if (meeting.status === "FINISHED") {
-      throw badRequest("Cannot update a finished meeting");
+      throw badRequest("Cuộc họp đã kết thúc nên không sửa được");
     }
 
     const nextStart = req.body.startTime || meeting.start_time;
@@ -497,12 +517,12 @@ meetingsRouter.put(
     assertEnum(nextMeetingType, MEETING_TYPES, "meeting type");
 
     if (["OFFLINE", "HYBRID"].includes(nextMeetingType) && !nextRoomId) {
-      throw badRequest("Room is required for offline or hybrid meetings");
+      throw badRequest("Cuộc họp tập trung cần chọn phòng họp vật lý");
     }
 
     if (nextRoomId) {
       const conflict = await hasRoomConflict(nextRoomId, nextStart, nextEnd, req.params.id);
-      if (conflict) throw badRequest("Room schedule conflict", { conflict });
+      if (conflict) throw badRequest("Phòng họp đã có lịch trùng khung giờ này", { conflict });
     }
 
     const { rows } = await pool.query(
@@ -524,6 +544,10 @@ meetingsRouter.put(
              WHEN $3 IN ('ONLINE', 'HYBRID') AND online_room_url IS NULL THEN $10 || id::text
              WHEN $3 = 'OFFLINE' THEN NULL
              ELSE online_room_url
+           END,
+           online_enabled_at = CASE
+             WHEN $3 IN ('ONLINE', 'HYBRID') THEN COALESCE(online_enabled_at, now())
+             ELSE NULL
            END,
            updated_at = now()
        WHERE id = $9
@@ -557,7 +581,7 @@ meetingsRouter.put(
       changes.push(`phòng họp → ${room?.rows[0]?.name || "họp trực tuyến"}`);
     }
     if (meeting.meeting_type !== updated.meeting_type) {
-      changes.push(`hình thức → ${updated.meeting_type}`);
+      changes.push(`hình thức → ${MEETING_TYPE_LABELS[updated.meeting_type]}`);
     }
     if (meeting.title !== updated.title) {
       changes.push(`tên cuộc họp → ${updated.title}`);
@@ -575,6 +599,15 @@ meetingsRouter.put(
         excludeUserId: req.user.id
       });
     }
+
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.MEETING_UPDATE,
+      entityType: "MEETING",
+      entityId: updated.id,
+      meetingId: updated.id,
+      description: changes.length > 0 ? `Sửa cuộc họp: ${changes.join(", ")}` : "Sửa cuộc họp",
+      metadata: { changes }
+    });
 
     res.json({ data: updated });
   })
@@ -602,6 +635,13 @@ meetingsRouter.put(
       )}.`,
       excludeUserId: req.user.id
     });
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.MEETING_CANCEL,
+      entityType: "MEETING",
+      entityId: rows[0].id,
+      meetingId: rows[0].id,
+      description: `Huỷ cuộc họp "${rows[0].title}"`
+    });
     res.json({ data: rows[0] });
   })
 );
@@ -612,7 +652,7 @@ meetingsRouter.put(
   asyncHandler(async (req, res) => {
     const meeting = await assertMeetingOrganizer(req.user, req.params.id);
     if (!["UPCOMING", "DRAFT"].includes(meeting.status)) {
-      throw badRequest("Only upcoming meetings can be started");
+      throw badRequest("Chỉ bắt đầu được cuộc họp đang ở trạng thái nháp hoặc sắp diễn ra");
     }
 
     const { rows } = await pool.query(
@@ -640,7 +680,111 @@ meetingsRouter.put(
       message: "Phòng họp đã mở, bạn có thể vào phòng ngay bây giờ.",
       excludeUserId: req.user.id
     });
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.MEETING_START,
+      entityType: "MEETING",
+      entityId: rows[0].id,
+      meetingId: rows[0].id,
+      description: `Bắt đầu cuộc họp "${rows[0].title}"`
+    });
     res.json({ data: rows[0] });
+  })
+);
+
+
+/**
+ * Bật / tắt phòng họp trực tuyến cho một cuộc họp đã tạo.
+ * Cuộc họp tập trung (OFFLINE) khi bật phòng video sẽ thành HYBRID
+ * mà vẫn giữ nguyên phòng vật lý, tài liệu, agenda, điểm danh đang có.
+ */
+meetingsRouter.put(
+  "/:id/online-room",
+  requireRole("ORGANIZER"),
+  asyncHandler(async (req, res) => {
+    const meeting = await assertMeetingOrganizer(req.user, req.params.id);
+    if (["FINISHED", "CANCELLED"].includes(meeting.status)) {
+      throw badRequest("Cuộc họp đã kết thúc hoặc bị huỷ nên không đổi được phòng trực tuyến");
+    }
+
+    const enabled = req.body.enabled !== false;
+    const isOn = meeting.meeting_type !== "OFFLINE";
+    // Dữ liệu cũ có thể ở dạng ONLINE/HYBRID mà thiếu tên phòng: vẫn cần tạo lại.
+    const missingRoom = isOn && !meeting.online_room_name;
+
+    if (enabled && isOn && !missingRoom) {
+      return res.json({ data: meeting, meta: { changed: false } });
+    }
+    if (!enabled && !isOn) {
+      return res.json({ data: meeting, meta: { changed: false } });
+    }
+    if (!enabled && meeting.meeting_type === "ONLINE") {
+      throw badRequest(
+        "Cuộc họp trực tuyến bắt buộc có phòng video. Hãy đổi sang hình thức tập trung và chọn phòng họp vật lý trước."
+      );
+    }
+    if (enabled && meeting.meeting_type === "OFFLINE" && !meeting.room_id) {
+      throw badRequest("Cuộc họp chưa có phòng vật lý, hãy chọn phòng hoặc đổi sang hình thức trực tuyến");
+    }
+
+    const { rows } = enabled
+      ? await pool.query(
+          `UPDATE meetings
+           SET meeting_type = CASE WHEN meeting_type = 'OFFLINE' THEN 'HYBRID' ELSE meeting_type END,
+               online_room_name = COALESCE(online_room_name, $2),
+               online_room_url = COALESCE(online_room_url, $3),
+               online_enabled_at = COALESCE(online_enabled_at, now()),
+               updated_at = now()
+           WHERE id = $1
+           RETURNING *`,
+          [meeting.id, buildLiveRoomName(meeting.id), buildLiveRoomUrl(meeting.id)]
+        )
+      : await pool.query(
+          `UPDATE meetings
+           SET meeting_type = 'OFFLINE',
+               online_room_name = NULL,
+               online_room_url = NULL,
+               online_enabled_at = NULL,
+               updated_at = now()
+           WHERE id = $1
+           RETURNING *`,
+          [meeting.id]
+        );
+
+    const updated = rows[0];
+    emitMeetingEvent(req.params.id, "meeting_status_updated", updated);
+    emitMeetingEvent(req.params.id, "online_room_updated", {
+      meetingId: updated.id,
+      enabled,
+      meetingType: updated.meeting_type,
+      roomUrl: updated.online_room_url
+    });
+
+    await notifyMeetingAudience(req.params.id, {
+      type: enabled
+        ? NOTIFICATION_TYPES.MEETING_ONLINE_ENABLED
+        : NOTIFICATION_TYPES.MEETING_ONLINE_DISABLED,
+      severity: enabled ? "SUCCESS" : "INFO",
+      actorId: req.user.id,
+      title: enabled
+        ? `Đã mở phòng trực tuyến: ${updated.title}`
+        : `Đã tắt phòng trực tuyến: ${updated.title}`,
+      message: enabled
+        ? `${req.user.full_name} đã bật phòng họp video. Bạn có thể tham gia từ xa khi cuộc họp diễn ra.`
+        : `${req.user.full_name} đã tắt phòng họp video. Cuộc họp trở lại hình thức tập trung tại phòng.`,
+      metadata: { meetingType: updated.meeting_type },
+      excludeUserId: req.user.id
+    });
+
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.MEETING_ONLINE_ROOM,
+      entityType: "MEETING",
+      entityId: updated.id,
+      meetingId: updated.id,
+      description: `${enabled ? "Bật" : "Tắt"} phòng họp trực tuyến cho "${updated.title}"`,
+      metadata: { enabled, meetingType: updated.meeting_type }
+    });
+
+    res.json({ data: updated, meta: { changed: true } });
   })
 );
 
@@ -650,7 +794,7 @@ meetingsRouter.put(
   asyncHandler(async (req, res) => {
     const meeting = await assertMeetingOrganizer(req.user, req.params.id);
     if (meeting.status !== "ONGOING") {
-      throw badRequest("Only ongoing meetings can be finished");
+      throw badRequest("Chỉ kết thúc được cuộc họp đang diễn ra");
     }
 
     const { rows } = await pool.query(
@@ -668,6 +812,13 @@ meetingsRouter.put(
       message: "Bạn có thể xem lại biên bản, tài liệu và nhiệm vụ được giao trong hồ sơ cuộc họp.",
       excludeUserId: req.user.id
     });
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.MEETING_FINISH,
+      entityType: "MEETING",
+      entityId: rows[0].id,
+      meetingId: rows[0].id,
+      description: `Kết thúc cuộc họp "${rows[0].title}"`
+    });
     res.json({ data: rows[0] });
   })
 );
@@ -678,7 +829,7 @@ meetingsRouter.delete(
   asyncHandler(async (req, res) => {
     const meeting = await assertMeetingOrganizer(req.user, req.params.id);
     if (meeting.status === "FINISHED") {
-      throw badRequest("Cannot delete a finished meeting");
+      throw badRequest("Cuộc họp đã kết thúc nên không xoá được");
     }
 
     await notifyMeetingAudience(req.params.id, {
@@ -696,6 +847,13 @@ meetingsRouter.delete(
        WHERE id = $1`,
       [req.params.id]
     );
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.MEETING_DELETE,
+      entityType: "MEETING",
+      entityId: req.params.id,
+      meetingId: req.params.id,
+      description: `Xoá cuộc họp "${meeting.title}" khỏi lịch`
+    });
     res.status(204).send();
   })
 );

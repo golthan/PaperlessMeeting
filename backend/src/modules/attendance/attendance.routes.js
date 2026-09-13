@@ -8,7 +8,8 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { badRequest, notFound } from "../../utils/httpError.js";
 import {
   assertEnum,
-  ATTENDANCE_STATUSES
+  ATTENDANCE_STATUSES,
+  requireFields
 } from "../../utils/validators.js";
 import {
   assertMeetingAccess,
@@ -16,6 +17,13 @@ import {
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
 import { emitMeetingEvent } from "../../config/socket.js";
+import { AUDIT_ACTIONS, writeAuditLog } from "../audit/audit.service.js";
+import {
+  CHECKED_IN_STATUSES,
+  LATE_AFTER_MINUTES,
+  markAttendance,
+  resolveAttendanceStatus
+} from "./attendance.service.js";
 
 export const attendanceRouter = express.Router({ mergeParams: true });
 
@@ -42,6 +50,14 @@ attendanceRouter.post(
 
     const payload = JSON.stringify({ meetingId: req.params.meetingId, token });
     const qrDataUrl = await QRCode.toDataURL(payload);
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.ATTENDANCE_QR,
+      entityType: "MEETING",
+      entityId: req.params.meetingId,
+      meetingId: req.params.meetingId,
+      description: `Tạo mã QR điểm danh, hiệu lực ${expiresInMinutes} phút`
+    });
+
     res.status(201).json({ data: rows[0], qrDataUrl, payload });
   })
 );
@@ -52,7 +68,7 @@ attendanceRouter.post(
   asyncHandler(async (req, res) => {
     const meeting = await assertParticipantAccess(req.user, req.params.meetingId);
     if (meeting.status !== "ONGOING") {
-      throw badRequest("Check-in is allowed only when meeting is ongoing");
+      throw badRequest("Chỉ điểm danh được khi cuộc họp đang diễn ra");
     }
 
     let method = "MANUAL";
@@ -63,7 +79,7 @@ attendanceRouter.post(
            AND (expires_at IS NULL OR expires_at > now())`,
         [req.params.meetingId, req.body.token]
       );
-      if (!rows[0]) throw badRequest("Invalid or expired attendance token");
+      if (!rows[0]) throw badRequest("Mã QR điểm danh không hợp lệ hoặc đã hết hạn");
       method = "QR";
     }
 
@@ -72,40 +88,37 @@ attendanceRouter.post(
        WHERE meeting_id = $1 AND user_id = $2`,
       [req.params.meetingId, req.user.id]
     );
-    if (current.rows[0]?.attendance_status === "PRESENT") {
-      throw badRequest("Already checked in");
+    if (CHECKED_IN_STATUSES.includes(current.rows[0]?.attendance_status)) {
+      throw badRequest("Bạn đã điểm danh cuộc họp này rồi");
     }
 
-    const { rows } = await pool.query(
-      `UPDATE meeting_participants
-       SET attendance_status = 'PRESENT',
-           attendance_method = $1,
-           checked_in_at = now(),
-           updated_at = now()
-       WHERE meeting_id = $2 AND user_id = $3
-       RETURNING *`,
-      [method, req.params.meetingId, req.user.id]
-    );
-
-    await pool.query(
-      `INSERT INTO attendance (meeting_id, user_id, checkin_time, method, status, updated_at)
-       VALUES ($1, $2, now(), $3, 'PRESENT', now())
-       ON CONFLICT (meeting_id, user_id) DO UPDATE
-         SET checkin_time = COALESCE(attendance.checkin_time, now()),
-             method = EXCLUDED.method,
-             status = 'PRESENT',
-             updated_at = now()`,
-      [req.params.meetingId, req.user.id, method]
-    );
+    // Điểm danh sau giờ bắt đầu quá LATE_AFTER_MINUTES phút thì ghi nhận đi muộn.
+    const status = resolveAttendanceStatus(meeting);
+    const row = await markAttendance({
+      meetingId: req.params.meetingId,
+      userId: req.user.id,
+      status,
+      method
+    });
 
     emitMeetingEvent(req.params.meetingId, "attendance_updated", {
       meetingId: req.params.meetingId,
       userId: req.user.id,
-      status: "PRESENT",
-      method
+      status,
+      method,
+      checkedInAt: row?.checked_in_at || null
     });
 
-    res.json({ data: rows[0] });
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.ATTENDANCE_CHECKIN,
+      entityType: "MEETING",
+      entityId: req.params.meetingId,
+      meetingId: req.params.meetingId,
+      description: `Tự điểm danh (${status}) bằng hình thức ${method}`,
+      metadata: { status, method }
+    });
+
+    res.json({ data: row, meta: { status, method, lateAfterMinutes: LATE_AFTER_MINUTES } });
   })
 );
 
@@ -134,37 +147,34 @@ attendanceRouter.put(
   requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     await assertMeetingOrganizer(req.user, req.params.meetingId);
+    requireFields(req.body, ["status"]);
     assertEnum(req.body.status, ATTENDANCE_STATUSES, "attendance status");
 
-    const { rows } = await pool.query(
-      `UPDATE meeting_participants
-       SET attendance_status = $1,
-           attendance_method = 'MANUAL',
-           checked_in_at = CASE WHEN $1 = 'PRESENT' THEN now() ELSE checked_in_at END,
-           updated_at = now()
-       WHERE meeting_id = $2 AND user_id = $3
-       RETURNING *`,
-      [req.body.status, req.params.meetingId, req.params.userId]
-    );
-    if (!rows[0]) throw notFound("Participant not found");
-    await pool.query(
-      `INSERT INTO attendance (meeting_id, user_id, checkin_time, method, status, updated_at)
-       VALUES ($1, $2, CASE WHEN $3 = 'PRESENT' THEN now() ELSE NULL END, 'MANUAL', $3, now())
-       ON CONFLICT (meeting_id, user_id) DO UPDATE
-         SET checkin_time = CASE WHEN $3 = 'PRESENT' THEN COALESCE(attendance.checkin_time, now()) ELSE attendance.checkin_time END,
-             method = 'MANUAL',
-             status = $3,
-             updated_at = now()`,
-      [req.params.meetingId, req.params.userId, req.body.status]
-    );
-
-    emitMeetingEvent(req.params.meetingId, "attendance_updated", {
+    const row = await markAttendance({
       meetingId: req.params.meetingId,
       userId: req.params.userId,
       status: req.body.status,
       method: "MANUAL"
     });
+    if (!row) throw notFound("Participant not found");
 
-    res.json({ data: rows[0] });
+    emitMeetingEvent(req.params.meetingId, "attendance_updated", {
+      meetingId: req.params.meetingId,
+      userId: req.params.userId,
+      status: req.body.status,
+      method: "MANUAL",
+      checkedInAt: row.checked_in_at || null
+    });
+
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.ATTENDANCE_UPDATE,
+      entityType: "MEETING",
+      entityId: req.params.meetingId,
+      meetingId: req.params.meetingId,
+      description: `Chủ trì ghi nhận điểm danh: ${row.full_name || req.params.userId} → ${req.body.status}`,
+      metadata: { targetUserId: req.params.userId, status: req.body.status }
+    });
+
+    res.json({ data: row });
   })
 );

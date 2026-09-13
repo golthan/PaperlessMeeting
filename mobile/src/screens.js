@@ -27,7 +27,16 @@ import {
   StatBox,
   StatusPill
 } from "./components";
-import { asArray, formatDate, formatDateTime } from "./format";
+import {
+  asArray,
+  attendanceMethodLabel,
+  attendanceSummary,
+  formatDate,
+  formatDateTime,
+  hasOnlineRoom,
+  meetingPlaceLabel,
+  percent
+} from "./format";
 import { colors, radii, shadow, spacing } from "./theme";
 
 export function LoginScreen({ auth, booting }) {
@@ -233,7 +242,7 @@ export function MeetingsScreen({ auth, refreshKey, onOpenMeeting }) {
             <CardRow
               key={meeting.id}
               title={meeting.title}
-              subtitle={`${formatDateTime(meeting.start_time)} · ${meeting.room_name || meeting.online_room_name || meeting.meeting_type || ""}`}
+              subtitle={`${formatDateTime(meeting.start_time)} · ${meetingPlaceLabel(meeting)}`}
               meta={meeting.organizer_name}
               onPress={() => onOpenMeeting(meeting.id)}
               right={
@@ -450,7 +459,7 @@ export function MeetingDetailScreen({ auth, meetingId, onOpenLive, onBack }) {
       });
       setVoteResults((current) => ({
         ...current,
-        [voteId]: result.data.results || []
+        [voteId]: { results: result.data.results || [], summary: result.data.summary }
       }));
     } catch (err) {
       setError(err.message);
@@ -510,14 +519,15 @@ export function MeetingDetailScreen({ auth, meetingId, onOpenLive, onBack }) {
             <StatusPill value={meeting.status} />
           </View>
           <Text style={styles.muted}>{formatDateTime(meeting.start_time)}</Text>
-          <Text style={styles.muted}>
-            {meeting.room_name || meeting.online_room_name || meeting.meeting_type}
-          </Text>
-          {onOpenLive && meeting.status === "ONGOING" && meeting.meeting_type !== "OFFLINE" && (
+          <Text style={styles.muted}>{meetingPlaceLabel(meeting)}</Text>
+          <View style={styles.rowWrap}>
+            <StatusPill value={meeting.meeting_type} />
+          </View>
+          {onOpenLive && meeting.status === "ONGOING" && (
             <View style={styles.rowWrap}>
               <PrimaryButton
-                icon="videocam-outline"
-                title="Vào phòng Live"
+                icon={hasOnlineRoom(meeting) ? "videocam-outline" : "easel-outline"}
+                title="Vào phòng họp"
                 onPress={onOpenLive}
               />
             </View>
@@ -645,7 +655,70 @@ function AgendaTab({ meeting }) {
   );
 }
 
+function ParticipantsTab({ meeting }) {
+  const people = asArray(meeting.participants);
+  const joined = people.filter((item) => item.is_online);
+  const away = people.filter((item) => !item.is_online);
+
+  function renderRow(participant) {
+    return (
+      <View key={participant.user_id} style={styles.participantRow}>
+        <View style={[styles.avatar, participant.is_online && styles.avatarOnline]}>
+          <Text style={styles.avatarText}>
+            {(participant.full_name || "?").slice(0, 1).toUpperCase()}
+          </Text>
+        </View>
+        <View style={styles.flex}>
+          <Text style={styles.itemTitle}>{participant.full_name}</Text>
+          <Text style={styles.muted}>
+            {participant.role_in_meeting === "SECRETARY" ? "Thư ký" : "Thành viên"}
+            {participant.department_name ? " · " + participant.department_name : ""}
+          </Text>
+        </View>
+        <View style={styles.stackSmall}>
+          {!!participant.is_hand_raised && <StatusPill value="LATE" label="Giơ tay" />}
+          <StatusPill value={participant.attendance_status || "ABSENT"} />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <Panel>
+      <SectionTitle
+        title="Người tham dự"
+        action={
+          <Text style={styles.muted}>
+            {joined.length}/{people.length} đang trong phòng
+          </Text>
+        }
+      />
+      {people.length === 0 ? (
+        <EmptyState title="Chưa có người tham dự" />
+      ) : (
+        <View style={styles.stack}>
+          <Text style={styles.groupLabel}>Đang trong phòng ({joined.length})</Text>
+          {joined.length === 0 ? (
+            <Text style={styles.muted}>Chưa có ai vào phòng họp.</Text>
+          ) : (
+            joined.map(renderRow)
+          )}
+          <Text style={styles.groupLabel}>Chưa vào phòng ({away.length})</Text>
+          {away.length === 0 ? (
+            <Text style={styles.muted}>Tất cả đã vào phòng.</Text>
+          ) : (
+            away.map(renderRow)
+          )}
+        </View>
+      )}
+    </Panel>
+  );
+}
+
 function AttendanceTab({ meeting, onCheckIn }) {
+  const summary = attendanceSummary(meeting.participants);
+  const ongoing = meeting.status === "ONGOING";
+
   return (
     <Panel>
       <SectionTitle
@@ -655,17 +728,49 @@ function AttendanceTab({ meeting, onCheckIn }) {
             icon="checkmark-outline"
             title="Điểm danh"
             onPress={onCheckIn}
-            disabled={meeting.status !== "ONGOING"}
+            disabled={!ongoing}
           />
         }
       />
-      {meeting.status !== "ONGOING" && (
-        <Text style={styles.muted}>Chỉ điểm danh khi cuộc họp đang ONGOING.</Text>
+      <View style={styles.summaryGrid}>
+        <View style={styles.summaryTile}>
+          <Text style={styles.summaryTileLabel}>Có mặt</Text>
+          <Text style={styles.summaryTileValue}>{summary.present}</Text>
+        </View>
+        <View style={styles.summaryTile}>
+          <Text style={styles.summaryTileLabel}>Đi muộn</Text>
+          <Text style={styles.summaryTileValue}>{summary.late}</Text>
+        </View>
+        <View style={styles.summaryTile}>
+          <Text style={styles.summaryTileLabel}>Chưa điểm danh</Text>
+          <Text style={styles.summaryTileValue}>{summary.absent}</Text>
+        </View>
+        <View style={styles.summaryTile}>
+          <Text style={styles.summaryTileLabel}>Tỉ lệ</Text>
+          <Text style={styles.summaryTileValue}>
+            {percent(summary.checkedIn, summary.total)}%
+          </Text>
+        </View>
+      </View>
+      {!ongoing && (
+        <Text style={styles.muted}>Chỉ điểm danh được khi cuộc họp đang diễn ra.</Text>
       )}
+      <Text style={styles.muted}>
+        Vào phòng họp lúc đang diễn ra sẽ tự điểm danh; muộn hơn 10 phút so với giờ bắt
+        đầu được ghi nhận là đi muộn.
+      </Text>
       <View style={styles.stack}>
         {asArray(meeting.participants).map((participant) => (
-          <View key={participant.user_id} style={styles.summaryRow}>
-            <Text style={styles.itemTitle}>{participant.full_name}</Text>
+          <View key={participant.user_id} style={styles.participantRow}>
+            <View style={styles.flex}>
+              <Text style={styles.itemTitle}>{participant.full_name}</Text>
+              <Text style={styles.muted}>
+                {attendanceMethodLabel(participant.attendance_method)}
+                {participant.checked_in_at
+                  ? " · " + formatDateTime(participant.checked_in_at)
+                  : ""}
+              </Text>
+            </View>
             <StatusPill value={participant.attendance_status || "ABSENT"} />
           </View>
         ))}
@@ -675,15 +780,23 @@ function AttendanceTab({ meeting, onCheckIn }) {
 }
 
 function VotesTab({ meeting, results, onAnswer, onResults }) {
+  const totalPeople = asArray(meeting.participants).length;
+
   return (
     <Panel>
       <SectionTitle title="Biểu quyết" />
       {asArray(meeting.votes).length === 0 ? (
-        <EmptyState title="Chưa có biểu quyết" />
+        <EmptyState title="Chưa có nội dung biểu quyết" />
       ) : (
         <View style={styles.stack}>
           {meeting.votes.map((vote) => {
             const options = normalizeOptions(vote.options);
+            const result = results[vote.id];
+            const voted =
+              result?.summary?.totalResponses ?? Number(vote.response_count || 0);
+            const total = result?.summary?.eligibleVoters || totalPeople;
+            const showResults = vote.status === "CLOSED" && !!result?.results;
+
             return (
               <View key={vote.id} style={styles.voteBox}>
                 <View style={styles.rowBetween}>
@@ -691,32 +804,62 @@ function VotesTab({ meeting, results, onAnswer, onResults }) {
                   <StatusPill value={vote.status} />
                 </View>
                 {!!vote.description && <Text style={styles.muted}>{vote.description}</Text>}
+
+                <Text style={styles.muted}>
+                  {voted}/{total} người đã bỏ phiếu
+                </Text>
+                <View style={styles.progressTrack}>
+                  <View
+                    style={[styles.progressFill, { width: percent(voted, total) + "%" }]}
+                  />
+                </View>
+
                 {vote.my_answer ? (
                   <Text style={styles.answerText}>Bạn đã chọn: {vote.my_answer}</Text>
+                ) : vote.status === "OPEN" ? (
+                  <View style={styles.rowWrap}>
+                    {options.map((option) => (
+                      <SecondaryButton
+                        key={option}
+                        title={option}
+                        onPress={() => onAnswer(vote.id, option)}
+                      />
+                    ))}
+                  </View>
                 ) : (
-                  vote.status === "OPEN" && (
-                    <View style={styles.rowWrap}>
-                      {options.map((option) => (
-                        <SecondaryButton
-                          key={option}
-                          title={option}
-                          onPress={() => onAnswer(vote.id, option)}
-                        />
-                      ))}
-                    </View>
-                  )
+                  <Text style={styles.muted}>
+                    {vote.status === "DRAFT"
+                      ? "Chủ trì chưa mở biểu quyết này."
+                      : "Biểu quyết đã chốt."}
+                  </Text>
                 )}
-                <SecondaryButton
-                  icon="bar-chart-outline"
-                  title="Xem kết quả"
-                  onPress={() => onResults(vote.id)}
-                />
-                {!!results[vote.id] && (
+
+                {vote.status === "CLOSED" && !result && (
+                  <SecondaryButton
+                    icon="bar-chart-outline"
+                    title="Xem kết quả"
+                    onPress={() => onResults(vote.id)}
+                  />
+                )}
+
+                {showResults && (
                   <View style={styles.stackSmall}>
-                    {results[vote.id].map((item) => (
-                      <View key={item.answer} style={styles.summaryRow}>
-                        <Text style={styles.muted}>{item.answer}</Text>
-                        <Text style={styles.summaryCount}>{item.count}</Text>
+                    {result.results.map((item) => (
+                      <View key={item.answer}>
+                        <View style={styles.summaryRow}>
+                          <Text style={styles.muted}>{item.answer}</Text>
+                          <Text style={styles.summaryCount}>
+                            {item.count} · {percent(item.count, voted || 1)}%
+                          </Text>
+                        </View>
+                        <View style={styles.progressTrack}>
+                          <View
+                            style={[
+                              styles.progressFill,
+                              { width: percent(item.count, voted || 1) + "%" }
+                            ]}
+                          />
+                        </View>
                       </View>
                     ))}
                   </View>
@@ -807,7 +950,8 @@ export function LiveMeetingScreen({ auth, meetingId, onBack }) {
     ] = await Promise.all([
       apiRequest(`/meetings/${meetingId}`, { token: auth.token }),
       apiRequest(`/meetings/${meetingId}/live-config`, { token: auth.token }),
-      apiRequest(`/meetings/${meetingId}/chat?limit=100`, { token: auth.token }),
+      // scope=room: bỏ qua tin thảo luận trong hộp tài liệu trên web.
+      apiRequest(`/meetings/${meetingId}/chat?limit=100&scope=room`, { token: auth.token }),
       apiRequest(`/meetings/${meetingId}/public-notes`, { token: auth.token }),
       apiRequest(`/meetings/${meetingId}/personal-notes`, { token: auth.token })
     ]);
@@ -932,7 +1076,7 @@ export function LiveMeetingScreen({ auth, meetingId, onBack }) {
       });
       setVoteResults((current) => ({
         ...current,
-        [voteId]: result.data.results || []
+        [voteId]: { results: result.data.results || [], summary: result.data.summary }
       }));
     } catch (err) {
       setError(err.message);
@@ -983,9 +1127,7 @@ export function LiveMeetingScreen({ auth, meetingId, onBack }) {
                 <StatusPill value={meeting.status} />
               </View>
               <Text style={styles.muted}>{formatDateTime(meeting.start_time)}</Text>
-              <Text style={styles.muted}>
-                {meeting.room_name || liveConfig.roomName || meeting.meeting_type}
-              </Text>
+              <Text style={styles.muted}>{meetingPlaceLabel(meeting)}</Text>
               <View style={styles.rowWrap}>
                 <StatusPill value={meeting.meeting_type} />
                 <StatusPill value={permissions.roleInMeeting || "MEMBER"} />
@@ -994,14 +1136,28 @@ export function LiveMeetingScreen({ auth, meetingId, onBack }) {
 
             {activeTab === "room" && (
               <Panel>
-                <SectionTitle title="Phòng họp trực tuyến" />
+                <SectionTitle title="Phòng họp" />
                 <View style={styles.stack}>
-                  <PrimaryButton
-                    icon="videocam-outline"
-                    title="Mở phòng họp online"
-                    onPress={openOnlineRoom}
-                    disabled={!liveConfig.livekitToken}
-                  />
+                  {hasOnlineRoom(meeting) ? (
+                    <>
+                      <Text style={styles.muted}>
+                        Phòng họp trực tuyến đang bật. Mở phòng video để tham gia bằng
+                        camera và micro.
+                      </Text>
+                      <PrimaryButton
+                        icon="videocam-outline"
+                        title="Mở phòng họp video"
+                        onPress={openOnlineRoom}
+                        disabled={!liveConfig.livekitToken}
+                      />
+                    </>
+                  ) : (
+                    <Text style={styles.muted}>
+                      Cuộc họp tập trung tại {meeting.room_name || "phòng họp"}. Chủ trì
+                      chưa bật phòng trực tuyến — bạn vẫn theo dõi chương trình, tài liệu,
+                      biểu quyết và ghi chú ngay tại đây.
+                    </Text>
+                  )}
                   <SecondaryButton
                     icon="checkmark-outline"
                     title="Điểm danh"
@@ -1119,6 +1275,7 @@ export function LiveMeetingScreen({ auth, meetingId, onBack }) {
               </View>
             )}
 
+            {activeTab === "people" && <ParticipantsTab meeting={meeting} />}
             {activeTab === "agenda" && <AgendaTab meeting={meeting} />}
             {activeTab === "documents" && (
               <DocumentsTab
@@ -1168,6 +1325,7 @@ const detailTabs = [
 
 const liveTabs = [
   { key: "room", label: "Phòng", icon: "videocam-outline" },
+  { key: "people", label: "Người tham dự", icon: "people-outline" },
   { key: "chat", label: "Chat", icon: "chatbubbles-outline" },
   { key: "notes", label: "Ghi chú", icon: "create-outline" },
   { key: "agenda", label: "Agenda", icon: "list-outline" },
@@ -1252,6 +1410,51 @@ const styles = StyleSheet.create({
   },
   stackSmall: {
     gap: spacing.xs
+  },
+  groupLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    marginTop: spacing.xs,
+    textTransform: "uppercase"
+  },
+  summaryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm
+  },
+  summaryTile: {
+    backgroundColor: colors.surfaceSunken,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    flexGrow: 1,
+    minWidth: 96,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm
+  },
+  summaryTileLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "700"
+  },
+  summaryTileValue: {
+    color: colors.primaryDark,
+    fontSize: 20,
+    fontWeight: "800"
+  },
+  progressTrack: {
+    backgroundColor: colors.surfaceSunken,
+    borderRadius: radii.full,
+    height: 8,
+    overflow: "hidden",
+    width: "100%"
+  },
+  progressFill: {
+    backgroundColor: colors.primary,
+    borderRadius: radii.full,
+    height: "100%"
   },
   summaryRow: {
     alignItems: "center",
@@ -1369,6 +1572,10 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: "center",
     width: 40
+  },
+  avatarOnline: {
+    borderColor: colors.primary,
+    borderWidth: 2
   },
   avatarText: {
     color: colors.primary,

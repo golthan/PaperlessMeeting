@@ -6,6 +6,7 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { badRequest, notFound } from "../../utils/httpError.js";
 import { getPagination, paged } from "../../utils/pagination.js";
 import { hashPassword } from "../../utils/password.js";
+import { AUDIT_ACTIONS, writeAuditLog } from "../audit/audit.service.js";
 import {
   assertEmail,
   assertEnum,
@@ -117,6 +118,13 @@ usersRouter.post(
       ]
     );
 
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.USER_CREATE,
+      entityType: "USER",
+      entityId: rows[0].id,
+      description: "Tao tai khoan " + rows[0].email + " (" + rows[0].role + ")"
+    });
+
     res.status(201).json({ data: rows[0] });
   })
 );
@@ -146,6 +154,12 @@ usersRouter.put(
     );
 
     if (!rows[0]) throw notFound("User not found");
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.USER_UPDATE,
+      entityType: "USER",
+      entityId: rows[0].id,
+      description: `Cập nhật tài khoản ${rows[0].email}: vai trò ${rows[0].role}, trạng thái ${rows[0].status}`
+    });
     res.json({ data: rows[0] });
   })
 );
@@ -162,6 +176,12 @@ usersRouter.delete(
       req.params.id
     ]);
     if (!rowCount) throw notFound("User not found");
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.USER_DELETE,
+      entityType: "USER",
+      entityId: req.params.id,
+      description: "Xoá tài khoản người dùng"
+    });
     res.status(204).send();
   })
 );

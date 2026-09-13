@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Paperless Meeting",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "paperless_meeting",
+      "Username": "paperless",
+      "SSLMode": "prefer",
+      "Comment": "Database he thong phong hop khong giay to (chay trong Docker)"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   ArrowRight,
+  Building2,
   CalendarClock,
   Check,
   ChevronDown,
@@ -13,10 +14,12 @@ import {
   Search,
   Trash2,
   Upload,
-  Users
+  Users,
+  Video
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { formatDateTime, toDateTimeLocal } from "../../utils/format.js";
+import { MEETING_MODES, resolveMeetingType } from "../../utils/meeting.js";
 
 const STEPS = [
   { key: "info", label: "Thông tin chung", icon: Info },
@@ -24,24 +27,6 @@ const STEPS = [
   { key: "people", label: "Thành phần tham dự", icon: Users },
   { key: "agenda", label: "Chương trình nghị sự", icon: ClipboardList },
   { key: "review", label: "Xem lại & xác nhận", icon: Check }
-];
-
-const MEETING_TYPES = [
-  {
-    value: "ONLINE",
-    title: "Trực tuyến",
-    desc: "Họp qua phòng video LiveKit, không cần phòng vật lý"
-  },
-  {
-    value: "HYBRID",
-    title: "Kết hợp",
-    desc: "Phòng họp vật lý kèm cầu truyền hình cho người ở xa"
-  },
-  {
-    value: "OFFLINE",
-    title: "Tập trung",
-    desc: "Họp trực tiếp tại phòng, không mở phòng online"
-  }
 ];
 
 const ROLE_LABELS = {
@@ -67,7 +52,8 @@ export function buildInitialWizardForm() {
     title: "",
     description: "",
     notes: "",
-    meetingType: "HYBRID",
+    meetingMode: "OFFLINE",
+    onlineRoom: false,
     startTime: toDateTimeLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)),
     endTime: toDateTimeLocal(new Date(Date.now() + 26 * 60 * 60 * 1000)),
     roomId: ""
@@ -98,7 +84,7 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
   const selectedRoom = rooms.find((room) => room.id === form.roomId);
   const roomOverCapacity =
     selectedRoom &&
-    form.meetingType !== "ONLINE" &&
+    form.meetingMode === "OFFLINE" &&
     selectedIds.length + 1 > Number(selectedRoom.capacity || 0);
 
   const visibleUsers = useMemo(() => {
@@ -190,8 +176,8 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
     if (key === "schedule") {
       if (!form.startTime || !form.endTime) return "Vui lòng chọn thời gian họp";
       if (meetingMinutes <= 0) return "Thời gian kết thúc phải sau thời gian bắt đầu";
-      if (form.meetingType !== "ONLINE" && !form.roomId) {
-        return "Cuộc họp tập trung / kết hợp cần chọn phòng họp vật lý";
+      if (form.meetingMode === "OFFLINE" && !form.roomId) {
+        return "Cuộc họp tập trung cần chọn phòng họp vật lý";
       }
     }
     if (key === "people") {
@@ -246,10 +232,10 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
       title: form.title.trim(),
       description: form.description.trim() || undefined,
       notes: form.notes.trim() || undefined,
-      meetingType: form.meetingType,
+      meetingType: resolveMeetingType(form.meetingMode, form.onlineRoom),
       startTime: form.startTime,
       endTime: form.endTime,
-      roomId: form.meetingType === "ONLINE" ? null : form.roomId,
+      roomId: form.meetingMode === "ONLINE" ? null : form.roomId,
       participants: selectedIds.map((userId) => ({
         userId,
         ...selected[userId]
@@ -328,26 +314,53 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
             <div>
               <span className="field-label">Hình thức họp *</span>
               <div className="type-cards">
-                {MEETING_TYPES.map((item) => (
+                {MEETING_MODES.map((item) => (
                   <button
                     key={item.value}
                     type="button"
-                    className={`type-card ${form.meetingType === item.value ? "active" : ""}`}
+                    className={`type-card ${form.meetingMode === item.value ? "active" : ""}`}
                     onClick={() =>
                       update({
-                        meetingType: item.value,
+                        meetingMode: item.value,
                         roomId:
-                          item.value === "ONLINE"
-                            ? ""
-                            : form.roomId || rooms[0]?.id || ""
+                          item.value === "ONLINE" ? "" : form.roomId || rooms[0]?.id || ""
                       })
                     }
                   >
+                    <span className="type-card-icon">
+                      {item.value === "ONLINE" ? <Video size={17} /> : <Building2 size={17} />}
+                    </span>
                     <strong>{item.title}</strong>
                     <span>{item.desc}</span>
                   </button>
                 ))}
               </div>
+              {form.meetingMode === "OFFLINE" ? (
+                <label className="switch-row">
+                  <input
+                    type="checkbox"
+                    checked={form.onlineRoom}
+                    onChange={(e) => update({ onlineRoom: e.target.checked })}
+                  />
+                  <span>
+                    <strong>Mở sẵn phòng họp trực tuyến cho người dự từ xa</strong>
+                    <small>
+                      Không bắt buộc. Chủ trì có thể bật phòng video bất cứ lúc nào, kể cả
+                      khi cuộc họp đang diễn ra.
+                    </small>
+                  </span>
+                </label>
+              ) : (
+                <p className="inline-note">
+                  <Video size={14} />
+                  Hệ thống tự tạo phòng video LiveKit cho cuộc họp này.
+                </p>
+              )}
+              <p className="inline-note">
+                <ClipboardList size={14} />
+                Cả hai hình thức đều dùng chuẩn không giấy tờ: tài liệu số, chương trình
+                nghị sự, điểm danh, biểu quyết, biên bản và nhiệm vụ sau họp.
+              </p>
             </div>
             <label>
               Ghi chú nội bộ cho ban tổ chức
@@ -389,7 +402,7 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
                   : "--"}
               </strong>
             </div>
-            {form.meetingType !== "ONLINE" ? (
+            {form.meetingMode === "OFFLINE" ? (
               <label>
                 Phòng họp vật lý *
                 <select
@@ -412,7 +425,7 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
             ) : (
               <div className="stat-tile">
                 <span>Địa điểm</span>
-                <strong>Phòng LiveKit tự tạo</strong>
+                <strong>Phòng họp trực tuyến</strong>
               </div>
             )}
           </div>
@@ -424,8 +437,9 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
             </div>
           )}
           <p className="muted">
-            Hệ thống sẽ tự kiểm tra trùng lịch phòng khi tạo. Nếu phòng đã có cuộc họp
-            trong khung giờ này, bạn sẽ nhận được cảnh báo kèm lịch bị trùng.
+            {form.meetingMode === "OFFLINE"
+              ? "Hệ thống sẽ tự kiểm tra trùng lịch phòng khi tạo. Nếu phòng đã có cuộc họp trong khung giờ này, bạn sẽ nhận được cảnh báo kèm lịch bị trùng."
+              : "Cuộc họp trực tuyến không chiếm phòng vật lý nên không cần kiểm tra trùng lịch phòng."}
           </p>
         </div>
       )}
@@ -655,7 +669,10 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
                 <div>
                   <dt>Hình thức</dt>
                   <dd>
-                    {MEETING_TYPES.find((t) => t.value === form.meetingType)?.title}
+                    {MEETING_MODES.find((item) => item.value === form.meetingMode)?.title}
+                    {form.meetingMode === "OFFLINE" && form.onlineRoom
+                      ? " + phòng trực tuyến"
+                      : ""}
                   </dd>
                 </div>
                 <div>
@@ -668,12 +685,14 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
                 <div>
                   <dt>Địa điểm</dt>
                   <dd>
-                    {form.meetingType === "ONLINE"
+                    {form.meetingMode === "ONLINE"
                       ? "Phòng họp trực tuyến LiveKit (tự tạo khi bắt đầu)"
                       : selectedRoom
                         ? `${selectedRoom.name} (${selectedRoom.capacity} chỗ)`
                         : "--"}
-                    {form.meetingType === "HYBRID" ? " + phòng LiveKit" : ""}
+                    {form.meetingMode === "OFFLINE" && form.onlineRoom
+                      ? " + phòng trực tuyến LiveKit"
+                      : ""}
                   </dd>
                 </div>
                 {form.description && (

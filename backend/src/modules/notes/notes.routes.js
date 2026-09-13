@@ -16,7 +16,8 @@ function sanitizeContent(content) {
     .slice(0, 20000);
 }
 
-async function assertCanEditPublicNotes(user, meetingId) {
+/** Ghi chú dùng chung (của cuộc họp và của từng tài liệu) chỉ chủ trì hoặc thư ký được sửa. */
+export async function assertCanEditSharedNotes(user, meetingId) {
   const meeting = await assertMeetingAccess(user, meetingId);
   if (meeting.organizer_id === user.id || user.role === "ADMIN") return meeting;
 
@@ -27,7 +28,7 @@ async function assertCanEditPublicNotes(user, meetingId) {
     [meetingId, user.id]
   );
   if (rows[0]?.role_in_meeting !== "SECRETARY") {
-    throw forbidden("Only organizer or secretary can edit public notes");
+    throw forbidden("Chỉ chủ trì hoặc thư ký được sửa ghi chú chung");
   }
   return meeting;
 }
@@ -53,7 +54,7 @@ publicNotesRouter.get(
 publicNotesRouter.put(
   "/",
   asyncHandler(async (req, res) => {
-    await assertCanEditPublicNotes(req.user, req.params.meetingId);
+    await assertCanEditSharedNotes(req.user, req.params.meetingId);
     const content = sanitizeContent(req.body.content);
 
     const { rows } = await pool.query(

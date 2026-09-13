@@ -5,6 +5,7 @@ import { asyncHandler } from "../../utils/asyncHandler.js";
 import { badRequest, HttpError } from "../../utils/httpError.js";
 import { comparePassword, hashPassword } from "../../utils/password.js";
 import { signToken } from "../../utils/jwt.js";
+import { AUDIT_ACTIONS, writeAuditLog } from "../audit/audit.service.js";
 import {
   assertEmail,
   assertPassword,
@@ -61,14 +62,29 @@ authRouter.post(
     const user = rows[0];
 
     if (!user || !(await comparePassword(password, user.password_hash))) {
-      throw new HttpError(401, "Invalid email or password");
+      // Ghi cả lần đăng nhập hỏng để phát hiện hành vi dò mật khẩu.
+      await writeAuditLog(req, {
+        action: AUDIT_ACTIONS.LOGIN_FAILED,
+        entityType: "USER",
+        entityId: user?.id || null,
+        actorName: email,
+        description: "Đăng nhập thất bại với email " + email
+      });
+      throw new HttpError(401, "Sai email hoặc mật khẩu");
     }
 
     if (user.status === "LOCKED") {
-      throw new HttpError(403, "Account is locked");
+      throw new HttpError(403, "Tài khoản đã bị khoá");
     }
 
     const safeUser = sanitizeUser(user);
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.LOGIN,
+      entityType: "USER",
+      entityId: user.id,
+      actor: safeUser,
+      description: safeUser.full_name + " đăng nhập hệ thống"
+    });
     res.json({ user: safeUser, token: signToken(safeUser) });
   })
 );

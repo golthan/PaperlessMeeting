@@ -18,6 +18,7 @@ import { StatusPill } from "../../components/StatusPill.jsx";
 import { useToast } from "../../components/ToastProvider.jsx";
 import { roleHome } from "../../auth/AuthContext.jsx";
 import { formatDateTime } from "../../utils/format.js";
+import { hasOnlineRoom, meetingPlaceLabel } from "../../utils/meeting.js";
 import { MeetingWizard } from "./MeetingWizard.jsx";
 
 function detailHref(role, id) {
@@ -36,30 +37,16 @@ function liveHref(role, id) {
   return null;
 }
 
-function meetingPlace(meeting) {
-  if (meeting.meeting_type === "ONLINE") {
-    return meeting.online_room_name || "Phòng online sẽ tạo khi bắt đầu";
-  }
-  if (meeting.meeting_type === "HYBRID") {
-    return [meeting.room_name, meeting.online_room_name].filter(Boolean).join(" + ");
-  }
-  return meeting.room_name || "Chưa chọn phòng";
-}
-
+/**
+ * Phòng họp của hệ thống mở cho mọi hình thức: cuộc họp tập trung vẫn có
+ * chương trình, tài liệu, điểm danh, biểu quyết; chỉ khác là chưa có khung video.
+ */
 function canJoinLive(role, meeting) {
-  return (
-    liveHref(role, meeting.id) &&
-    meeting.status === "ONGOING" &&
-    meeting.meeting_type !== "OFFLINE"
-  );
+  return Boolean(liveHref(role, meeting.id)) && meeting.status === "ONGOING";
 }
 
 function canStartLive(role, meeting) {
-  return (
-    role === "ORGANIZER" &&
-    ["UPCOMING", "DRAFT"].includes(meeting.status) &&
-    meeting.meeting_type !== "OFFLINE"
-  );
+  return role === "ORGANIZER" && ["UPCOMING", "DRAFT"].includes(meeting.status);
 }
 
 export function MeetingsPage() {
@@ -219,7 +206,9 @@ export function MeetingsPage() {
                   <div className="meeting-card-top">
                     <StatusPill value={item.meeting_type} />
                     <StatusPill value={item.status} />
-                    {user.role === "PARTICIPANT" && <StatusPill value={item.invitation_status} />}
+                    {user.role === "PARTICIPANT" && (
+                      <StatusPill value={item.invitation_status} kind="invitation" />
+                    )}
                   </div>
                   <h3>{item.title}</h3>
                   <div className="meeting-meta-grid">
@@ -229,7 +218,7 @@ export function MeetingsPage() {
                     </span>
                     <span>
                       <DoorOpen size={15} />
-                      {meetingPlace(item)}
+                      {meetingPlaceLabel(item)}
                     </span>
                     <span>
                       <Users size={15} />
@@ -239,8 +228,11 @@ export function MeetingsPage() {
                   {item.organizer_name && (
                     <p className="meeting-owner">Organizer: {item.organizer_name}</p>
                   )}
-                  {item.online_room_url && (
-                    <p className="meeting-online-room">{item.online_room_url}</p>
+                  {hasOnlineRoom(item) && item.online_room_url && (
+                    <p className="meeting-online-room">
+                      <Video size={13} />
+                      {item.online_room_url}
+                    </p>
                   )}
                 </div>
                 <div className="meeting-card-actions">
@@ -263,13 +255,17 @@ export function MeetingsPage() {
                       disabled={busyMeetingId === item.id}
                     >
                       <Video size={16} />
-                      {busyMeetingId === item.id ? "Đang mở..." : "Bắt đầu & vào phòng"}
+                      {busyMeetingId === item.id
+                        ? "Đang mở..."
+                        : hasOnlineRoom(item)
+                          ? "Bắt đầu & vào phòng"
+                          : "Bắt đầu cuộc họp"}
                     </button>
                   )}
                   {canJoinLive(user.role, item) && (
                     <Link className="primary-button" to={liveHref(user.role, item.id)}>
                       <Video size={16} />
-                      Vào phòng
+                      Vào phòng họp
                     </Link>
                   )}
                   <Link className="secondary-button" to={detailHref(user.role, item.id)}>
