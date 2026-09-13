@@ -226,8 +226,9 @@ export function MeetingDetailPage() {
           description: editForm.description || null,
           notes: editForm.notes || null,
           meetingType: resolveMeetingType(editForm.meetingMode, editForm.onlineRoom),
-          startTime: editForm.startTime,
-          endTime: editForm.endTime,
+          // Ô datetime-local không kèm múi giờ; gửi ISO để server không hiểu nhầm thành giờ UTC
+          startTime: new Date(editForm.startTime).toISOString(),
+          endTime: new Date(editForm.endTime).toISOString(),
           roomId: editForm.meetingMode === "ONLINE" ? null : editForm.roomId,
           status: editForm.status
         }),

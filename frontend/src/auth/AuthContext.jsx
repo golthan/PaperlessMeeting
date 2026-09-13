@@ -10,7 +10,13 @@ export function roleHome(role) {
 }
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem("token"));
+  const [token, setToken] = useState(() => {
+    const saved = localStorage.getItem("token");
+    // Gắn header ngay khi khởi tạo: effect của component con (NotificationProvider)
+    // chạy trước effect bên dưới nên sẽ gọi API khi chưa có token.
+    setAuthToken(saved);
+    return saved;
+  });
   const [user, setUser] = useState(() => {
     const raw = localStorage.getItem("user");
     return raw ? JSON.parse(raw) : null;

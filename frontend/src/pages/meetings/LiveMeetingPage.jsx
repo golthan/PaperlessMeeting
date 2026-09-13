@@ -745,7 +745,12 @@ export function LiveMeetingPage() {
             <p>
               {formatDateTime(meeting.start_time)} · {meetingPlaceLabel(meeting)} ·{" "}
               <span className={`live-signal is-${socketState}`}>
-                realtime {socketState === "online" ? "đang kết nối" : socketState}
+                realtime{" "}
+                {socketState === "online"
+                  ? "đã kết nối"
+                  : socketState === "offline"
+                    ? "mất kết nối"
+                    : "đang kết nối"}
               </span>
             </p>
           </div>

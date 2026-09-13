@@ -233,8 +233,9 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
       description: form.description.trim() || undefined,
       notes: form.notes.trim() || undefined,
       meetingType: resolveMeetingType(form.meetingMode, form.onlineRoom),
-      startTime: form.startTime,
-      endTime: form.endTime,
+      // Ô datetime-local không kèm múi giờ; gửi ISO để server không hiểu nhầm thành giờ UTC
+      startTime: new Date(form.startTime).toISOString(),
+      endTime: new Date(form.endTime).toISOString(),
       roomId: form.meetingMode === "ONLINE" ? null : form.roomId,
       participants: selectedIds.map((userId) => ({
         userId,
