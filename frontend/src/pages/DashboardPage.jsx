@@ -10,6 +10,7 @@ import { useNotifications } from "../notifications/NotificationContext.jsx";
 
 const labels = {
   totalUsers: "Người dùng",
+  pendingUsers: "Đăng ký chờ duyệt",
   totalMeetings: "Cuộc họp",
   ongoingMeetings: "Đang diễn ra",
   upcomingMeetings: "Sắp diễn ra",

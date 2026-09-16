@@ -673,6 +673,41 @@ input[type="radio"] {
   white-space: nowrap;
 }
 
+/* Avatar và tên trên topbar là lối tắt vào trang Hồ sơ cá nhân. */
+a.avatar,
+a.topbar-identity {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.topbar-identity {
+  color: inherit;
+  border-radius: var(--r-full);
+  transition: opacity 0.15s ease;
+}
+
+a.avatar:hover,
+a.topbar-identity:hover {
+  opacity: 0.8;
+}
+
+/* Bảng hồ sơ chờ duyệt: đủ rộng để đọc trọn tên quyền, phòng ban, ghi chú. */
+.pending-table select {
+  min-width: 150px;
+}
+
+.pending-table input {
+  min-width: 180px;
+}
+
+.pending-table small {
+  overflow-wrap: anywhere;
+}
+
+.pending-table td.row-actions {
+  white-space: nowrap;
+}
+
 .mobile-menu {
   display: none;
   align-items: center;
@@ -685,6 +720,8 @@ input[type="radio"] {
 
 .page-stack {
   display: grid;
+  /* minmax(0, 1fr): không cho bảng rộng đẩy tràn cả trang; .table-wrap tự cuộn ngang. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
 

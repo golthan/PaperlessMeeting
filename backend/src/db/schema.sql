@@ -434,3 +434,28 @@ BEGIN
   ALTER TABLE agenda_items DROP CONSTRAINT IF EXISTS agenda_status_check;
   ALTER TABLE agenda_items ADD CONSTRAINT agenda_status_check CHECK (status IN ('PENDING', 'CURRENT', 'DONE'));
 END $$;
+
+-- ============================================================
+-- Đăng ký tài khoản: người ngoài tự đăng ký, tài khoản nằm ở
+-- trạng thái PENDING cho tới khi quản trị viên duyệt và cấp
+-- quyền. Bị từ chối thì chuyển REJECTED (giữ lại để truy vết,
+-- không xoá hẳn).
+--
+-- Hồ sơ cá nhân: thêm số điện thoại và chức vụ để người dùng
+-- tự cập nhật trong trang Hồ sơ.
+-- ============================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title VARCHAR(120);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS review_note TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ;
+
+DO $$
+BEGIN
+  ALTER TABLE users DROP CONSTRAINT IF EXISTS users_status_check;
+  ALTER TABLE users ADD CONSTRAINT users_status_check
+    CHECK (status IN ('ACTIVE', 'LOCKED', 'PENDING', 'REJECTED'));
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);

@@ -20,7 +20,8 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
   }
 
   const { rows } = await pool.query(
-    `SELECT id, full_name, email, role, status, department_id, avatar_url, created_at, updated_at
+    `SELECT id, full_name, email, role, status, department_id, avatar_url,
+            phone, job_title, created_at, updated_at
      FROM users
      WHERE id = $1`,
     [payload.sub]
@@ -31,7 +32,16 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
   }
 
   if (rows[0].status === "LOCKED") {
-    throw new HttpError(403, "Account is locked");
+    throw new HttpError(403, "Tài khoản đã bị khoá");
+  }
+
+  // Token cấp trước khi bị từ chối / hạ về chờ duyệt vẫn phải bị chặn ngay.
+  if (rows[0].status === "PENDING") {
+    throw new HttpError(403, "Tài khoản đang chờ quản trị viên phê duyệt");
+  }
+
+  if (rows[0].status === "REJECTED") {
+    throw new HttpError(403, "Đăng ký của tài khoản này đã bị từ chối");
   }
 
   req.user = rows[0];

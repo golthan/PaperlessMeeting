@@ -58,7 +58,12 @@ export const AUDIT_ACTIONS = {
 
   USER_CREATE: "USER_CREATE",
   USER_UPDATE: "USER_UPDATE",
-  USER_DELETE: "USER_DELETE"
+  USER_DELETE: "USER_DELETE",
+  USER_REGISTER: "USER_REGISTER",
+  USER_APPROVE: "USER_APPROVE",
+  USER_REJECT: "USER_REJECT",
+  USER_PROFILE_UPDATE: "USER_PROFILE_UPDATE",
+  USER_PASSWORD_CHANGE: "USER_PASSWORD_CHANGE"
 };
 
 /** Nhãn tiếng Việt để hiển thị trong trang nhật ký. */
@@ -101,7 +106,12 @@ export const AUDIT_ACTION_LABELS = {
   MINUTES_VERIFY: "Tra cứu biên bản",
   USER_CREATE: "Tạo tài khoản",
   USER_UPDATE: "Sửa tài khoản",
-  USER_DELETE: "Xoá tài khoản"
+  USER_DELETE: "Xoá tài khoản",
+  USER_REGISTER: "Đăng ký tài khoản",
+  USER_APPROVE: "Duyệt tài khoản",
+  USER_REJECT: "Từ chối đăng ký",
+  USER_PROFILE_UPDATE: "Cập nhật hồ sơ cá nhân",
+  USER_PASSWORD_CHANGE: "Đổi mật khẩu"
 };
 
 /** Nhóm hành động, dùng cho bộ lọc nhanh trên giao diện. */
@@ -113,7 +123,18 @@ export const AUDIT_GROUPS = {
   ),
   VOTE: Object.keys(AUDIT_ACTIONS).filter((key) => key.startsWith("VOTE")),
   ATTENDANCE: Object.keys(AUDIT_ACTIONS).filter((key) => key.startsWith("ATTENDANCE")),
-  ACCOUNT: ["LOGIN", "LOGIN_FAILED", "USER_CREATE", "USER_UPDATE", "USER_DELETE"]
+  ACCOUNT: [
+    "LOGIN",
+    "LOGIN_FAILED",
+    "USER_CREATE",
+    "USER_UPDATE",
+    "USER_DELETE",
+    "USER_REGISTER",
+    "USER_APPROVE",
+    "USER_REJECT",
+    "USER_PROFILE_UPDATE",
+    "USER_PASSWORD_CHANGE"
+  ]
 };
 
 function clientIp(req) {

@@ -85,6 +85,7 @@ const labels = {
 const contextLabels = {
   invitation: { PENDING: "Chờ phản hồi" },
   document: { PENDING: "Chờ duyệt" },
+  account: { PENDING: "Chờ quản trị duyệt", REJECTED: "Đã bị từ chối" },
   agenda: { PENDING: "Chưa trình bày", DONE: "Đã xong" },
   vote: { DRAFT: "Nháp", OPEN: "Đang lấy ý kiến", CLOSED: "Đã chốt" },
   presence: { ONLINE: "Trong phòng" }

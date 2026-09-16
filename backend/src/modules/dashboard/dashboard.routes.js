@@ -12,8 +12,8 @@ dashboardRouter.get(
   "/admin",
   requireRole("ADMIN"),
   asyncHandler(async (_req, res) => {
-    const [users, meetings, ongoing, upcoming, rooms, tasks] = await Promise.all([
-      pool.query("SELECT COUNT(*)::int AS count FROM users"),
+    const [users, meetings, ongoing, upcoming, rooms, tasks, pendingUsers] = await Promise.all([
+      pool.query("SELECT COUNT(*)::int AS count FROM users WHERE status <> 'REJECTED'"),
       pool.query("SELECT COUNT(*)::int AS count FROM meetings WHERE deleted_at IS NULL"),
       pool.query(
         "SELECT COUNT(*)::int AS count FROM meetings WHERE status = 'ONGOING' AND deleted_at IS NULL"
@@ -24,7 +24,8 @@ dashboardRouter.get(
       pool.query("SELECT COUNT(*)::int AS count FROM rooms"),
       pool.query(
         "SELECT status, COUNT(*)::int AS count FROM meeting_tasks WHERE deleted_at IS NULL GROUP BY status"
-      )
+      ),
+      pool.query("SELECT COUNT(*)::int AS count FROM users WHERE status = 'PENDING'")
     ]);
 
     res.json({
@@ -34,6 +35,7 @@ dashboardRouter.get(
         ongoingMeetings: ongoing.rows[0].count,
         upcomingMeetings: upcoming.rows[0].count,
         totalRooms: rooms.rows[0].count,
+        pendingUsers: pendingUsers.rows[0].count,
         tasksByStatus: tasks.rows
       }
     });

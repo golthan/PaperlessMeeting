@@ -76,12 +76,26 @@ async function run() {
 
   for (const [key, fullName, email, role, departmentId] of userSeeds) {
     const { rows } = await pool.query(
-      `INSERT INTO users (full_name, email, password_hash, role, department_id)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO users (full_name, email, password_hash, role, status, department_id)
+       VALUES ($1, $2, $3, $4, 'ACTIVE', $5)
        RETURNING id, full_name, email, role`,
       [fullName, email, passwordHash, role, departmentId]
     );
     users[key] = rows[0];
+  }
+
+  // Hai ho so dang ky dang cho duyet, de demo luong: dang ky -> admin duyet -> cap quyen.
+  const pendingSeeds = [
+    ["Nguyen Van Tan", "tan.nguyen@example.com", "0912345678", "Chuyen vien Phong Dao tao"],
+    ["Tran Thi Mai", "mai.tran@example.com", "0987654321", "Thu ky Hoi dong"]
+  ];
+  for (const [fullName, email, phone, jobTitle] of pendingSeeds) {
+    await pool.query(
+      `INSERT INTO users
+         (full_name, email, password_hash, role, status, phone, job_title, registered_at)
+       VALUES ($1, $2, $3, 'PARTICIPANT', 'PENDING', $4, $5, now() - INTERVAL '2 hours')`,
+      [fullName, email, passwordHash, phone, jobTitle]
+    );
   }
 
   const rooms = {};

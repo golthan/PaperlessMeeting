@@ -55,14 +55,19 @@ export function AuthProvider({ children }) {
     return res.data.user;
   }
 
+  /**
+   * Đăng ký KHÔNG đăng nhập ngay: tài khoản mới nằm ở trạng thái chờ duyệt,
+   * quản trị viên là người phê duyệt và cấp quyền.
+   */
   async function register(payload) {
     const res = await api.post("/auth/register", payload);
-    localStorage.setItem("token", res.data.token);
-    localStorage.setItem("user", JSON.stringify(res.data.user));
-    setAuthToken(res.data.token);
-    setToken(res.data.token);
-    setUser(res.data.user);
-    return res.data.user;
+    return res.data;
+  }
+
+  /** Cập nhật lại thông tin người đang đăng nhập sau khi sửa hồ sơ cá nhân. */
+  function updateUser(nextUser) {
+    localStorage.setItem("user", JSON.stringify(nextUser));
+    setUser(nextUser);
   }
 
   function logout() {
@@ -74,7 +79,7 @@ export function AuthProvider({ children }) {
   }
 
   const value = useMemo(
-    () => ({ token, user, booting, login, register, logout }),
+    () => ({ token, user, booting, login, register, logout, updateUser }),
     [token, user, booting]
   );
 

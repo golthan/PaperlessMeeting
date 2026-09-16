@@ -1,7 +1,9 @@
 import { badRequest } from "./httpError.js";
 
 export const ROLES = ["ADMIN", "ORGANIZER", "PARTICIPANT"];
-export const USER_STATUSES = ["ACTIVE", "LOCKED"];
+// PENDING: vua dang ky, dang cho quan tri vien duyet.
+// REJECTED: bi tu choi - giu lai ban ghi de truy vet, khong cho dang nhap.
+export const USER_STATUSES = ["ACTIVE", "LOCKED", "PENDING", "REJECTED"];
 export const ROOM_STATUSES = ["AVAILABLE", "UNAVAILABLE"];
 export const MEETING_STATUSES = [
   "DRAFT",
@@ -48,7 +50,7 @@ export function assertEmail(email) {
 
 export function assertPassword(password) {
   if (!password || password.length < 6) {
-    throw badRequest("Password must have at least 6 characters");
+    throw badRequest("Mật khẩu cần tối thiểu 6 ký tự");
   }
 }
 
