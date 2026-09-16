@@ -70,3 +70,17 @@ export function timeAgo(value) {
   return formatDate(value);
 }
 
+
+/**
+ * Nhãn tiếng Việt cho phương án biểu quyết "Tán thành / Không / Không ý kiến".
+ * Máy chủ vẫn lưu mã YES / NO / ABSTAIN; chỉ đổi cách hiển thị (khớp nhãn trong biên bản).
+ */
+const VOTE_ANSWER_LABELS = {
+  YES: "Tán thành",
+  NO: "Không tán thành",
+  ABSTAIN: "Không ý kiến"
+};
+
+export function voteAnswerLabel(answer) {
+  return VOTE_ANSWER_LABELS[answer] || answer;
+}

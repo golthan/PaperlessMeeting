@@ -1,6 +1,23 @@
 export const API_URL =
   process.env.EXPO_PUBLIC_API_URL || "http://10.0.2.2:4000/api";
 
+let sessionExpiredHandler = null;
+
+/** App đăng ký hàm xử lý khi phiên đăng nhập đang lưu trong máy không còn hợp lệ. */
+export function setSessionExpiredHandler(handler) {
+  sessionExpiredHandler = handler;
+}
+
+/**
+ * Chỉ coi là hết phiên khi lỗi thực sự nói về token / tài khoản.
+ * Không tính 401 "mật khẩu hiện tại không đúng" hay 403 do thiếu quyền trong cuộc họp.
+ */
+function isSessionInvalid(status, message) {
+  if (status === 401) return /token|user not found/i.test(message);
+  if (status === 403) return /bị khoá|chờ quản trị viên|bị từ chối|locked/i.test(message);
+  return false;
+}
+
 export async function apiRequest(path, options = {}) {
   const { token, body, multipart, headers, ...rest } = options;
   const requestHeaders = {
@@ -35,7 +52,12 @@ export async function apiRequest(path, options = {}) {
 
   if (!response.ok) {
     const message = data?.message || "Không thể kết nối máy chủ";
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    if (token && sessionExpiredHandler && isSessionInvalid(response.status, message)) {
+      sessionExpiredHandler(message);
+    }
+    throw error;
   }
 
   return data;

@@ -41,7 +41,10 @@ const TYPE_META = {
   VOTE_CLOSED: { icon: "podium-outline", label: "Biểu quyết" },
   MINUTES_PUBLISHED: { icon: "reader-outline", label: "Biên bản" },
   TASK_ASSIGNED: { icon: "clipboard-outline", label: "Nhiệm vụ mới" },
-  TASK_UPDATED: { icon: "refresh-outline", label: "Nhiệm vụ" }
+  TASK_UPDATED: { icon: "refresh-outline", label: "Nhiệm vụ" },
+  ACCOUNT_REGISTERED: { icon: "person-add-outline", label: "Đăng ký mới" },
+  ACCOUNT_APPROVED: { icon: "shield-checkmark-outline", label: "Tài khoản" },
+  ACCOUNT_REJECTED: { icon: "close-circle-outline", label: "Tài khoản" }
 };
 
 const SEVERITY_COLORS = {
