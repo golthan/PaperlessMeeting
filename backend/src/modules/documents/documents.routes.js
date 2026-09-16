@@ -438,6 +438,42 @@ documentsRouter.get(
   })
 );
 
+/**
+ * Nội dung tài liệu dạng JSON (base64) để trình duyệt tự dựng lại file và xem trước.
+ *
+ * Không trả thẳng file nhị phân như /preview vì các trình quản lý tải xuống phổ biến
+ * (Internet Download Manager...) chặn mọi phản hồi application/pdf của trình duyệt ở
+ * tầng mạng, bật hộp thoại tải về và trả cho trang một phản hồi 204 rỗng không có
+ * header CORS — khiến ô xem trước luôn báo lỗi. Phản hồi JSON không bị chặn.
+ */
+documentsRouter.get(
+  "/:id/content",
+  asyncHandler(async (req, res) => {
+    const document = await getDocument(req.params.id);
+    await assertDocumentAccess(req.user, document);
+
+    const buffer = await fs.promises.readFile(resolveUploadPath(document.file_path));
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.DOCUMENT_VIEW,
+      entityType: "DOCUMENT",
+      entityId: document.id,
+      meetingId: document.meeting_id,
+      description: `Xem tài liệu "${document.display_name}"`
+    });
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      data: {
+        id: document.id,
+        name: document.original_name,
+        mimeType: document.mime_type || "application/octet-stream",
+        size: buffer.length,
+        base64: buffer.toString("base64")
+      }
+    });
+  })
+);
+
 /** Ghi chú chung gắn với một tài liệu — nội dung hiển thị trong hộp tài liệu. */
 documentsRouter.get(
   "/:id/notes",
