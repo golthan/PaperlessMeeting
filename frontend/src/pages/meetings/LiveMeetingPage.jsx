@@ -50,6 +50,7 @@ import {
   onlineCount,
   percent
 } from "../../utils/meeting.js";
+import { voteAnswerLabel } from "../../utils/meeting.js";
 
 const LIVE_TABS = [
   { key: "agenda", label: "Chương trình", icon: ClipboardList },
@@ -655,7 +656,7 @@ export function LiveMeetingPage() {
   async function answerVote(vote, answer) {
     await run(
       () => api.post(`/votes/${vote.id}/responses`, { answer }),
-      `Đã gửi phiếu: ${answer}`
+      `Đã gửi phiếu: ${voteAnswerLabel(answer)}`
     );
   }
 

@@ -65,9 +65,9 @@ async function getMeetingDetail(user, meetingId) {
        JOIN users u ON u.id = doc.uploaded_by
        WHERE doc.meeting_id = $1
          AND doc.deleted_at IS NULL
-         AND ($2::boolean = false OR doc.status = 'APPROVED')
+         AND ($2::boolean = false OR doc.status = 'APPROVED' OR doc.uploaded_by = $3)
        ORDER BY doc.created_at DESC`,
-      [meetingId, participantCanOnlySeePublished]
+      [meetingId, participantCanOnlySeePublished, user.id]
     ),
     pool.query(
       `SELECT a.*, u.full_name AS presenter_name
@@ -512,6 +512,10 @@ meetingsRouter.put(
     const nextMeetingType = req.body.meetingType || meeting.meeting_type;
     const nextRoomId =
       req.body.roomId !== undefined ? req.body.roomId || null : meeting.room_id;
+    // Không gửi trường nào thì giữ nguyên giá trị cũ (tránh xoá mất mô tả / ghi chú khi chỉ đổi giờ).
+    const nextDescription =
+      req.body.description !== undefined ? req.body.description || null : meeting.description;
+    const nextNotes = req.body.notes !== undefined ? req.body.notes || null : meeting.notes;
     assertTimeRange(nextStart, nextEnd);
     assertEnum(req.body.status, MEETING_STATUSES, "status");
     assertEnum(nextMeetingType, MEETING_TYPES, "meeting type");
@@ -525,28 +529,31 @@ meetingsRouter.put(
       if (conflict) throw badRequest("Phòng họp đã có lịch trùng khung giờ này", { conflict });
     }
 
+    // $3 vừa gán vào cột varchar vừa so sánh với chuỗi: phải ép kiểu rõ ràng,
+    // nếu không PostgreSQL báo "inconsistent types deduced for parameter $3"
+    // và mọi thao tác sửa cuộc họp đều thất bại.
     const { rows } = await pool.query(
       `UPDATE meetings
        SET title = COALESCE($1, title),
            description = $2,
-           meeting_type = $3,
+           meeting_type = $3::varchar,
            start_time = $4,
            end_time = $5,
            room_id = $6,
            status = COALESCE($7, status),
            notes = $8,
            online_room_name = CASE
-             WHEN $3 IN ('ONLINE', 'HYBRID') AND online_room_name IS NULL THEN 'paperless-meeting-' || id::text
-             WHEN $3 = 'OFFLINE' THEN NULL
+             WHEN $3::varchar IN ('ONLINE', 'HYBRID') AND online_room_name IS NULL THEN 'paperless-meeting-' || id::text
+             WHEN $3::varchar = 'OFFLINE' THEN NULL
              ELSE online_room_name
            END,
            online_room_url = CASE
-             WHEN $3 IN ('ONLINE', 'HYBRID') AND online_room_url IS NULL THEN $10 || id::text
-             WHEN $3 = 'OFFLINE' THEN NULL
+             WHEN $3::varchar IN ('ONLINE', 'HYBRID') AND online_room_url IS NULL THEN $10::text || id::text
+             WHEN $3::varchar = 'OFFLINE' THEN NULL
              ELSE online_room_url
            END,
            online_enabled_at = CASE
-             WHEN $3 IN ('ONLINE', 'HYBRID') THEN COALESCE(online_enabled_at, now())
+             WHEN $3::varchar IN ('ONLINE', 'HYBRID') THEN COALESCE(online_enabled_at, now())
              ELSE NULL
            END,
            updated_at = now()
@@ -554,13 +561,13 @@ meetingsRouter.put(
        RETURNING *`,
       [
         req.body.title || null,
-        req.body.description || null,
+        nextDescription,
         nextMeetingType,
         nextStart,
         nextEnd,
         nextRoomId,
         req.body.status || null,
-        req.body.notes || null,
+        nextNotes,
         req.params.id,
         `${env.clientOrigin.replace(/\/$/, "")}/join/`
       ]

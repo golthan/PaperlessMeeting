@@ -55,7 +55,12 @@ async function getDocument(documentId) {
 
 async function assertDocumentAccess(user, document) {
   await assertMeetingAccess(user, document.meeting_id);
-  if (user.role === "PARTICIPANT" && document.status !== "APPROVED") {
+  // Người gửi luôn mở được tài liệu của chính mình để theo dõi (kể cả khi chờ duyệt / bị từ chối).
+  if (
+    user.role === "PARTICIPANT" &&
+    document.status !== "APPROVED" &&
+    document.uploaded_by !== user.id
+  ) {
     throw forbidden("Document is not approved");
   }
 }
@@ -75,9 +80,9 @@ meetingDocumentsRouter.get(
        JOIN users u ON u.id = doc.uploaded_by
        WHERE doc.meeting_id = $1
          AND doc.deleted_at IS NULL
-         AND ($2::boolean = false OR doc.status = 'APPROVED')
+         AND ($2::boolean = false OR doc.status = 'APPROVED' OR doc.uploaded_by = $3)
        ORDER BY doc.created_at DESC`,
-      [req.params.meetingId, participantFilter]
+      [req.params.meetingId, participantFilter, req.user.id]
     );
     res.json({ data: rows });
   })

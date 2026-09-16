@@ -1,6 +1,6 @@
 import { BarChart3, CheckCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { percent, voteOptions } from "../utils/meeting.js";
+import { percent, voteAnswerLabel, voteOptions } from "../utils/meeting.js";
 import { StatusPill } from "./StatusPill.jsx";
 
 /**
@@ -59,7 +59,7 @@ export function VoteCard({
               disabled={busy}
               onClick={() => onAnswer?.(vote, option)}
             >
-              {option}
+              {voteAnswerLabel(option)}
             </button>
           ))}
         </div>
@@ -67,7 +67,7 @@ export function VoteCard({
       {vote.my_answer && (
         <p className="vote-my-answer">
           <CheckCheck size={15} />
-          Bạn đã chọn: <strong>{vote.my_answer}</strong>
+          Bạn đã chọn: <strong>{voteAnswerLabel(vote.my_answer)}</strong>
         </p>
       )}
       {canVote && vote.status === "DRAFT" && (
@@ -78,7 +78,7 @@ export function VoteCard({
         <div className="vote-results">
           {result.results.map((row) => (
             <div key={row.answer} className="vote-result-row">
-              <span>{row.answer}</span>
+              <span>{voteAnswerLabel(row.answer)}</span>
               <div className="vote-result-bar">
                 <span style={{ width: `${percent(row.count, voted || 1)}%` }} />
               </div>

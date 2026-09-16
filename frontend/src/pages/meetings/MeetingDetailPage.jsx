@@ -40,6 +40,7 @@ import {
   percent,
   resolveMeetingType
 } from "../../utils/meeting.js";
+import { voteAnswerLabel } from "../../utils/meeting.js";
 
 const ROLE_LABELS = {
   SECRETARY: "Thư ký",
@@ -440,7 +441,7 @@ export function MeetingDetailPage() {
   async function answerVote(voteId, answer) {
     await run(
       () => api.post(`/votes/${voteId}/responses`, { answer }),
-      `Đã gửi phiếu: ${answer}`
+      `Đã gửi phiếu: ${voteAnswerLabel(answer)}`
     );
   }
 

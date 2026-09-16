@@ -200,7 +200,7 @@ export async function streamMinutesPdf(res, { minutes, meeting, integrity, verif
 
   if (minutes.conclusion) {
     doc.moveDown(0.6);
-    doc.font("vn-bold").fontSize(12).text("KẾT LUẬN");
+    doc.font("vn-bold").fontSize(12).text("VIII. KẾT LUẬN CỦA CHỦ TRÌ");
     doc.font("vn").fontSize(11).text(minutes.conclusion);
   }
 
@@ -211,6 +211,10 @@ export async function streamMinutesPdf(res, { minutes, meeting, integrity, verif
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i += 1) {
     doc.switchToPage(i);
+    // Dòng số trang nằm dưới lề dưới. Nếu giữ nguyên lề, PDFKit coi là tràn trang
+    // và tự chèn thêm một trang trắng cho mỗi dòng "Trang x/y".
+    const bottomMargin = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     doc
       .font("vn")
       .fontSize(8)
@@ -219,9 +223,10 @@ export async function streamMinutesPdf(res, { minutes, meeting, integrity, verif
         `Trang ${i - range.start + 1}/${range.count}`,
         PAGE_MARGIN,
         doc.page.height - PAGE_MARGIN + 12,
-        { width: doc.page.width - PAGE_MARGIN * 2, align: "right" }
+        { width: doc.page.width - PAGE_MARGIN * 2, align: "right", lineBreak: false }
       )
       .fillColor("#000000");
+    doc.page.margins.bottom = bottomMargin;
   }
 
   doc.end();

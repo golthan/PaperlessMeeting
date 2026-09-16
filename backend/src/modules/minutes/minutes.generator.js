@@ -248,11 +248,10 @@ export async function generateMinutesContent(meetingId) {
   push(notes?.content?.trim() || "(Thư ký bổ sung diễn biến thảo luận tại đây)");
   push();
 
-  push("## VII. KẾT LUẬN CỦA CHỦ TRÌ");
-  push("(Chủ trì bổ sung kết luận tại đây)");
-  push();
-
-  push("## VIII. NHIỆM VỤ ĐƯỢC GIAO");
+  // Kết luận của chủ trì nhập ở ô riêng (trường `conclusion`, cũng nằm trong phần được ký số)
+  // và in thành mục cuối biên bản, nên không chèn dòng giữ chỗ ở đây — trước đây dòng này
+  // không bao giờ được thay thế và kết luận bị in lặp ở hai nơi.
+  push("## VII. NHIỆM VỤ ĐƯỢC GIAO");
   if (tasks.length === 0) {
     push("Cuộc họp không giao nhiệm vụ cụ thể.");
   } else {
