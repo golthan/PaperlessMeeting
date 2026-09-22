@@ -17,6 +17,7 @@ import {
 } from "./src/screens";
 import { setSessionExpiredHandler } from "./src/api";
 import { NotificationsScreen, useNotificationCenter } from "./src/notifications";
+import { closeSharedSocket, useSocket } from "./src/realtime";
 import { ToastProvider, useToast } from "./src/toast";
 import { colors } from "./src/theme";
 import { BottomTabs, Header } from "./src/components";
@@ -68,6 +69,7 @@ function AppShell() {
         setUser(nextUser);
       },
       async logout() {
+        closeSharedSocket();
         await clearSession();
         setToken(null);
         setUser(null);
@@ -82,7 +84,9 @@ function AppShell() {
     [token, user, toast]
   );
 
-  const notificationCenter = useNotificationCenter(auth);
+  // Một kết nối realtime dùng chung: thông báo cá nhân và mọi phòng họp đang mở.
+  const { socket, status: realtimeStatus } = useSocket(token);
+  const notificationCenter = useNotificationCenter(auth, socket);
 
   // Tài khoản bị xoá / khoá / chưa được duyệt trong khi máy vẫn giữ token cũ:
   // tự đăng xuất và nói rõ lý do thay vì kẹt ở màn hình lỗi.
@@ -90,6 +94,7 @@ function AppShell() {
     setSessionExpiredHandler(async (message) => {
       if (expiredRef.current) return;
       expiredRef.current = true;
+      closeSharedSocket();
       await clearSession();
       setToken(null);
       setUser(null);
@@ -115,6 +120,10 @@ function AppShell() {
     setScreen({ name: "meetingDetail", meetingId });
   }
 
+  function joinMeeting(meetingId) {
+    setScreen({ name: "liveMeeting", meetingId });
+  }
+
   return (
     <SafeAreaView style={styles.shell}>
       <ExpoStatusBar style="dark" />
@@ -122,7 +131,7 @@ function AppShell() {
       <Header
         title={
           showLive
-            ? "Phòng họp Live"
+            ? "Phòng họp trực tiếp"
             : showDetail
               ? "Chi tiết cuộc họp"
               : titleByScreen(screen.name)
@@ -143,7 +152,12 @@ function AppShell() {
           <DashboardScreen auth={auth} refreshKey={refreshKey} />
         )}
         {screen.name === "meetings" && (
-          <MeetingsScreen auth={auth} refreshKey={refreshKey} onOpenMeeting={openMeeting} />
+          <MeetingsScreen
+            auth={auth}
+            refreshKey={refreshKey}
+            onOpenMeeting={openMeeting}
+            onJoinMeeting={joinMeeting}
+          />
         )}
         {screen.name === "notifications" && (
           <NotificationsScreen
@@ -158,17 +172,21 @@ function AppShell() {
           <MeetingDetailScreen
             auth={auth}
             meetingId={screen.meetingId}
+            socket={socket}
+            realtimeStatus={realtimeStatus}
             onBack={() => setScreen({ name: "meetings" })}
-            onOpenLive={() =>
-              setScreen({ name: "liveMeeting", meetingId: screen.meetingId })
-            }
+            onOpenLive={() => joinMeeting(screen.meetingId)}
           />
         )}
         {showLive && (
           <LiveMeetingScreen
             auth={auth}
             meetingId={screen.meetingId}
-            onBack={() => setScreen({ name: "meetingDetail", meetingId: screen.meetingId })}
+            socket={socket}
+            realtimeStatus={realtimeStatus}
+            onBack={() =>
+              setScreen({ name: "meetingDetail", meetingId: screen.meetingId })
+            }
           />
         )}
       </View>

@@ -103,7 +103,7 @@ const labelMap = {
   ONLINE: "Trực tuyến",
   OFFLINE: "Tập trung",
   HYBRID: "Tập trung + trực tuyến",
-  CHAIRMAN: "Chủ trì",
+  CHAIRMAN: "Chủ tọa",
   SECRETARY: "Thư ký",
   MEMBER: "Thành viên",
   HIGH: "Ưu tiên cao",

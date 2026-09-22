@@ -19,10 +19,12 @@ import {
   usePressScale
 } from "./components";
 import { timeAgo } from "./format";
+import { useSocketEvents } from "./realtime";
 import { colors, radii, shadow, spacing } from "./theme";
 import { useToast } from "./toast";
 
-const POLL_INTERVAL_MS = 20000;
+// Socket lo phần tức thời; polling chỉ còn là lưới an toàn khi mất kết nối.
+const POLL_INTERVAL_MS = 60000;
 
 const TYPE_META = {
   MEETING_INVITE: { icon: "mail-outline", label: "Lời mời họp" },
@@ -71,10 +73,12 @@ function severity(value) {
 
 /**
  * Trung tâm thông báo cho bản Android.
- * Bản mobile không mở socket nên dùng polling nhẹ 20 giây một lần;
- * mỗi thông báo mới sẽ bật toast ở góc phải trên màn hình.
+ *
+ * Máy chủ đẩy thẳng thông báo qua socket (phòng riêng của từng người dùng) nên
+ * toast hiện ngay khi có việc mới; vẫn giữ một nhịp polling thưa để bù lại
+ * những lúc điện thoại vừa mất sóng.
  */
-export function useNotificationCenter(auth) {
+export function useNotificationCenter(auth, socket) {
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -128,6 +132,21 @@ export function useNotificationCenter(auth) {
     const timer = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [auth?.token, load]);
+
+  // Thông báo đẩy từ máy chủ: chèn lên đầu danh sách và bật toast ngay.
+  useSocketEvents(socket, {
+    "notification:new"(notification) {
+      if (!notification?.id || seenIds.current.has(notification.id)) return;
+      seenIds.current.add(notification.id);
+      setItems((list) => [notification, ...list].slice(0, 60));
+      if (!notification.is_read) setUnread((value) => value + 1);
+      toastRef.current.push({
+        tone: TOAST_TONE[notification.severity] || "notification",
+        title: notification.title,
+        message: notification.message
+      });
+    }
+  });
 
   const markRead = useCallback(
     async (id) => {

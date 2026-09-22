@@ -63,13 +63,21 @@ export async function apiRequest(path, options = {}) {
   return data;
 }
 
+/** Máy chủ API và máy chủ LiveKit chạy cùng một máy trong bản triển khai nội bộ. */
+function apiHost() {
+  return API_URL.replace(/^https?:\/\//, "").replace(/[:/].*$/, "");
+}
+
+/** Địa chỉ LiveKit dùng khi máy chủ chưa khai báo LIVEKIT_WS_URL. */
+export function defaultLivekitUrl() {
+  return process.env.EXPO_PUBLIC_LIVEKIT_URL || `ws://${apiHost()}:7880`;
+}
+
 export function liveJoinUrl(meetingId, livekitToken) {
-  const host = API_URL.replace(/^https?:\/\//, "").replace(/[:/].*$/, "");
-  const webBase = process.env.EXPO_PUBLIC_WEB_URL || `http://${host}:5173`;
-  const livekitUrl = process.env.EXPO_PUBLIC_LIVEKIT_URL || `ws://${host}:7880`;
+  const webBase = process.env.EXPO_PUBLIC_WEB_URL || `http://${apiHost()}:5173`;
   return `${webBase.replace(/\/$/, "")}/join/${meetingId}#token=${encodeURIComponent(
     livekitToken
-  )}&url=${encodeURIComponent(livekitUrl)}`;
+  )}&url=${encodeURIComponent(defaultLivekitUrl())}`;
 }
 
 export function documentDownloadUrl(documentId, token) {

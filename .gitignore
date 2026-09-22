@@ -7,3 +7,7 @@ backend/uploads/*
 !backend/uploads/.gitkeep
 mobile/dist/
 
+
+# expo prebuild tự sinh lại được, không cần theo dõi
+mobile/android/
+mobile/ios/
