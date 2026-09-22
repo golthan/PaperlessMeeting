@@ -295,7 +295,7 @@ export function DocumentWorkspace({
             <p className="muted small">
               {canManage
                 ? "Tài liệu bạn đăng được duyệt ngay và hiện cho cả phòng họp."
-                : "Tài liệu bạn gửi sẽ chờ chủ trì duyệt trước khi mọi người xem được."}
+                : "Tài liệu bạn gửi sẽ chờ chủ tọa duyệt trước khi mọi người xem được."}
             </p>
           </form>
         )}
@@ -468,7 +468,7 @@ export function DocumentWorkspace({
                       Chưa có tóm tắt cho tài liệu này.
                       {canSummarize
                         ? " Bấm Tóm tắt tài liệu để AI đọc và rút gọn nội dung chính."
-                        : " Chủ trì hoặc thư ký sẽ tạo tóm tắt."}
+                        : " Chủ tọa hoặc thư ký sẽ tạo tóm tắt."}
                     </p>
                   )}
 
@@ -591,7 +591,7 @@ export function DocumentWorkspace({
               placeholder={
                 canEditNotes
                   ? "Ghi chú chung về tài liệu: kết luận, điểm cần sửa, phân công..."
-                  : "Chỉ chủ trì và thư ký được ghi vào đây."
+                  : "Chỉ chủ tọa và thư ký được ghi vào đây."
               }
             />
             <div className="doc-notes-foot">

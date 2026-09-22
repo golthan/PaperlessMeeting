@@ -1,13 +1,13 @@
 import express from "express";
 import { pool } from "../../config/db.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
-import { requireRole } from "../../middlewares/role.middleware.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { badRequest, notFound } from "../../utils/httpError.js";
 import { requireFields } from "../../utils/validators.js";
 import {
   assertMeetingAccess,
-  assertMeetingOrganizer
+  assertMeetingChairman,
+  assertMeetingSecretaryDuties
 } from "../meetings/meetingAccess.js";
 import { emitMeetingEvent } from "../../config/socket.js";
 
@@ -41,9 +41,8 @@ meetingAgendaRouter.get(
 
 meetingAgendaRouter.post(
   "/",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.meetingId);
+    await assertMeetingSecretaryDuties(req.user, req.params.meetingId);
     requireFields(req.body, ["title"]);
 
     const { rows } = await pool.query(
@@ -67,9 +66,8 @@ meetingAgendaRouter.post(
 
 meetingAgendaRouter.put(
   "/reorder",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.meetingId);
+    await assertMeetingSecretaryDuties(req.user, req.params.meetingId);
     if (!Array.isArray(req.body.items)) {
       throw badRequest("items array is required");
     }
@@ -89,10 +87,9 @@ meetingAgendaRouter.put(
 
 agendaRouter.put(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const item = await getAgendaItem(req.params.id);
-    await assertMeetingOrganizer(req.user, item.meeting_id);
+    await assertMeetingSecretaryDuties(req.user, item.meeting_id);
 
     const { rows } = await pool.query(
       `UPDATE agenda_items
@@ -121,10 +118,9 @@ agendaRouter.put(
 
 agendaRouter.delete(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const item = await getAgendaItem(req.params.id);
-    await assertMeetingOrganizer(req.user, item.meeting_id);
+    await assertMeetingSecretaryDuties(req.user, item.meeting_id);
     await pool.query("DELETE FROM agenda_items WHERE id = $1", [req.params.id]);
     res.status(204).send();
   })
@@ -132,10 +128,9 @@ agendaRouter.delete(
 
 agendaRouter.put(
   "/:id/current",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const item = await getAgendaItem(req.params.id);
-    await assertMeetingOrganizer(req.user, item.meeting_id);
+    await assertMeetingChairman(req.user, item.meeting_id);
 
     const { rows } = await pool.query(
       `WITH reset AS (
@@ -157,10 +152,9 @@ agendaRouter.put(
 
 agendaRouter.put(
   "/:id/done",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const item = await getAgendaItem(req.params.id);
-    await assertMeetingOrganizer(req.user, item.meeting_id);
+    await assertMeetingChairman(req.user, item.meeting_id);
 
     const { rows } = await pool.query(
       `UPDATE agenda_items

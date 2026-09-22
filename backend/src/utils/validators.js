@@ -15,6 +15,8 @@ export const MEETING_STATUSES = [
 export const MEETING_TYPES = ["ONLINE", "OFFLINE", "HYBRID"];
 export const ONLINE_PROVIDERS = ["LIVEKIT", "CUSTOM"];
 export const MEETING_ROLES = ["CHAIRMAN", "SECRETARY", "MEMBER"];
+// FREE: ai cũng tự bật mic. MODERATED: phải được chủ tọa mời mới phát biểu được.
+export const SPEAKER_MODES = ["FREE", "MODERATED"];
 export const INVITATION_STATUSES = ["PENDING", "ACCEPTED", "DECLINED"];
 export const ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "LATE"];
 export const DOCUMENT_STATUSES = ["PENDING", "APPROVED", "REJECTED"];

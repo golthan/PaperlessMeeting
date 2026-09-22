@@ -29,6 +29,13 @@ const VOTE_ANSWER_LABELS = {
   ABSTAIN: "Không ý kiến"
 };
 
+/** Nhãn vai trò in trong biên bản. */
+const MEETING_ROLE_LABELS = {
+  CHAIRMAN: "Chủ tọa",
+  SECRETARY: "Thư ký",
+  MEMBER: "Thành viên"
+};
+
 function percent(count, total) {
   if (!total) return 0;
   return Math.round((count / total) * 100);
@@ -158,6 +165,7 @@ export async function generateMinutesContent(meetingId) {
     (p) => !p.attendance_status || p.attendance_status === "ABSENT"
   );
   const secretary = participants.find((p) => p.role_in_meeting === "SECRETARY");
+  const chairman = participants.find((p) => p.role_in_meeting === "CHAIRMAN");
 
   const lines = [];
   const push = (text = "") => lines.push(text);
@@ -175,7 +183,7 @@ export async function generateMinutesContent(meetingId) {
           "Chưa xác định"
     }${meeting.meeting_type === "HYBRID" ? " (có kết nối trực tuyến)" : ""}`
   );
-  push(`Chủ trì: ${meeting.organizer_name}`);
+  push(`Chủ tọa: ${chairman?.full_name || meeting.organizer_name}`);
   push(`Thư ký: ${secretary?.full_name || "Chưa chỉ định"}`);
   if (meeting.description) push(`Nội dung chính: ${meeting.description}`);
   push();
@@ -187,7 +195,7 @@ export async function generateMinutesContent(meetingId) {
       `Tỷ lệ tham dự: ${percent(present.length + late.length, participants.length)}%.`
   );
   participants.forEach((person, index) => {
-    const role = person.role_in_meeting === "SECRETARY" ? "Thư ký" : "Thành viên";
+    const role = MEETING_ROLE_LABELS[person.role_in_meeting] || "Thành viên";
     const status = ATTENDANCE_LABELS[person.attendance_status] || "Vắng mặt";
     push(
       `${index + 1}. ${person.full_name}` +
@@ -244,11 +252,25 @@ export async function generateMinutesContent(meetingId) {
   }
   push();
 
+  // Mục duy nhất không lắp ráp được từ dữ liệu có cấu trúc: ý kiến nằm trong
+  // chat dạng văn xuôi. Ưu tiên ghi chú chung do thư ký tự viết; chưa có thì lấy
+  // bản nháp AI tổng hợp từ thảo luận, và ghi rõ nguồn để người ký biết phải rà.
   push("## VI. DIỄN BIẾN VÀ Ý KIẾN THẢO LUẬN");
-  push(notes?.content?.trim() || "(Thư ký bổ sung diễn biến thảo luận tại đây)");
+  if (notes?.content?.trim()) {
+    push(notes.content.trim());
+  } else if (notes?.ai_summary?.trim()) {
+    push(
+      `(Bản nháp do AI tổng hợp từ ${notes.ai_summary_message_count || 0} ý kiến trao đổi` +
+        " trong phòng họp — thư ký cần rà soát trước khi ký.)"
+    );
+    push();
+    push(notes.ai_summary.trim());
+  } else {
+    push("(Thư ký bổ sung diễn biến thảo luận tại đây)");
+  }
   push();
 
-  // Kết luận của chủ trì nhập ở ô riêng (trường `conclusion`, cũng nằm trong phần được ký số)
+  // Kết luận của chủ tọa nhập ở ô riêng (trường `conclusion`, cũng nằm trong phần được ký số)
   // và in thành mục cuối biên bản, nên không chèn dòng giữ chỗ ở đây — trước đây dòng này
   // không bao giờ được thay thế và kết luận bị in lặp ở hai nơi.
   push("## VII. NHIỆM VỤ ĐƯỢC GIAO");

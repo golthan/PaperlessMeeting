@@ -25,12 +25,19 @@ import {
   MEETING_STATUSES,
   MEETING_TYPES,
   ONLINE_PROVIDERS,
-  requireFields
+  requireFields,
+  SPEAKER_MODES
 } from "../../utils/validators.js";
 import {
   assertMeetingAccess,
-  assertMeetingOrganizer,
-  hasRoomConflict
+  assertMeetingChairman,
+  assertMeetingScheduling,
+  assertMeetingSecretaryDuties,
+  buildMeetingPermissions,
+  canSeeFullMeetingRecord,
+  getMeetingRole,
+  hasRoomConflict,
+  isMeetingScheduler
 } from "./meetingAccess.js";
 import { AUDIT_ACTIONS, writeAuditLog } from "../audit/audit.service.js";
 
@@ -47,7 +54,8 @@ meetingsRouter.use(authenticate);
 
 async function getMeetingDetail(user, meetingId) {
   const meeting = await assertMeetingAccess(user, meetingId);
-  const participantCanOnlySeePublished = user.role === "PARTICIPANT";
+  // Chủ tọa / thư ký thấy cả phần chưa công bố; thành viên chỉ thấy phần đã duyệt.
+  const limitedView = !(await canSeeFullMeetingRecord(user, meeting));
 
   const [participants, documents, agenda, votes, minutes, tasks] = await Promise.all([
     pool.query(
@@ -67,7 +75,7 @@ async function getMeetingDetail(user, meetingId) {
          AND doc.deleted_at IS NULL
          AND ($2::boolean = false OR doc.status = 'APPROVED' OR doc.uploaded_by = $3)
        ORDER BY doc.created_at DESC`,
-      [meetingId, participantCanOnlySeePublished, user.id]
+      [meetingId, limitedView, user.id]
     ),
     pool.query(
       `SELECT a.*, u.full_name AS presenter_name
@@ -92,7 +100,7 @@ async function getMeetingDetail(user, meetingId) {
        FROM minutes
        WHERE meeting_id = $1
          AND ($2::boolean = false OR status = 'PUBLISHED')`,
-      [meetingId, participantCanOnlySeePublished]
+      [meetingId, limitedView]
     ),
     pool.query(
       `SELECT t.*, assignee.full_name AS assigned_to_name, assigner.full_name AS assigned_by_name
@@ -102,12 +110,18 @@ async function getMeetingDetail(user, meetingId) {
        WHERE t.meeting_id = $1 AND t.deleted_at IS NULL
          AND ($2::boolean = false OR t.assigned_to = $3)
        ORDER BY t.created_at DESC`,
-      [meetingId, participantCanOnlySeePublished, user.id]
+      [meetingId, limitedView, user.id]
     )
   ]);
 
+  const myRow = participants.rows.find((row) => row.user_id === user.id) || null;
+  const permissions = buildMeetingPermissions(await getMeetingRole(user, meeting), myRow, {
+    isScheduler: isMeetingScheduler(user, meeting)
+  });
+
   return {
     ...meeting,
+    permissions,
     participants: participants.rows,
     documents: documents.rows,
     agenda: agenda.rows,
@@ -125,13 +139,14 @@ meetingsRouter.get(
     const filters = ["m.deleted_at IS NULL"];
     let join = "";
 
-    if (req.user.role === "ORGANIZER") {
+    if (req.user.role !== "ADMIN") {
+      // Thấy cuộc họp mình tạo lẫn cuộc họp mình được mời (kể cả khi được cử
+      // làm chủ tọa hay thư ký cho cuộc họp do người khác tạo).
+      join =
+        "LEFT JOIN meeting_participants mp_self ON mp_self.meeting_id = m.id " +
+        `AND mp_self.user_id = $${values.length + 1}`;
       values.push(req.user.id);
-      filters.push(`m.organizer_id = $${values.length}`);
-    } else if (req.user.role === "PARTICIPANT") {
-      join = "JOIN meeting_participants mp_self ON mp_self.meeting_id = m.id";
-      values.push(req.user.id);
-      filters.push(`mp_self.user_id = $${values.length}`);
+      filters.push(`(m.organizer_id = $${values.length} OR mp_self.user_id IS NOT NULL)`);
     }
 
     if (req.query.status) {
@@ -226,22 +241,10 @@ meetingsRouter.get(
       [req.params.id, req.user.id]
     );
 
-    const permissions =
-      meeting.organizer_id === req.user.id || req.user.role === "ADMIN"
-        ? {
-            roleInMeeting: "CHAIRMAN",
-            canShareScreen: true,
-            canUploadDocument: true,
-            canSpeak: true,
-            isOrganizer: true
-          }
-        : {
-            roleInMeeting: participant.rows[0]?.role_in_meeting || "MEMBER",
-            canShareScreen: Boolean(participant.rows[0]?.can_share_screen),
-            canUploadDocument: Boolean(participant.rows[0]?.can_upload_document),
-            canSpeak: participant.rows[0]?.can_speak !== false,
-            isOrganizer: false
-          };
+    const roleInMeeting = await getMeetingRole(req.user, meeting);
+    const permissions = buildMeetingPermissions(roleInMeeting, participant.rows[0], {
+      isScheduler: isMeetingScheduler(req.user, meeting)
+    });
 
     const roomName =
       meeting.online_room_name ||
@@ -265,6 +268,8 @@ meetingsRouter.get(
         livekitToken,
         onlineRoomEnabled: Boolean(roomName),
         onlineEnabledAt: meeting.online_enabled_at || null,
+        speakerMode: meeting.speaker_mode || "FREE",
+        currentSpeakerId: meeting.current_speaker_id || null,
         permissions
       }
     });
@@ -321,6 +326,40 @@ meetingsRouter.get(
   })
 );
 
+/**
+ * Danh sách phòng họp và người có thể mời thêm, dành cho màn hình chi tiết.
+ *
+ * Trước đây giao diện gọi thẳng /rooms và /users, nhưng hai chỗ đó chỉ mở cho
+ * ADMIN và ORGANIZER. Từ khi vai trò gắn theo từng cuộc họp, thư ký hay chủ tọa
+ * hoàn toàn có thể là một tài khoản Participant — họ vẫn phải mời được người và
+ * đổi được phòng. Cổng này giới hạn đúng trong phạm vi một cuộc họp nên không
+ * phải nới quyền xem toàn bộ danh bạ.
+ */
+meetingsRouter.get(
+  "/:id/scheduling-options",
+  asyncHandler(async (req, res) => {
+    await assertMeetingSecretaryDuties(req.user, req.params.id);
+
+    const [rooms, users] = await Promise.all([
+      pool.query("SELECT id, name, location, capacity, status FROM rooms ORDER BY name ASC"),
+      pool.query(
+        `SELECT u.id, u.full_name, u.email, d.name AS department_name
+         FROM users u
+         LEFT JOIN departments d ON d.id = u.department_id
+         WHERE u.role = 'PARTICIPANT'
+           AND u.status = 'ACTIVE'
+           AND u.id NOT IN (
+             SELECT user_id FROM meeting_participants WHERE meeting_id = $1
+           )
+         ORDER BY u.full_name ASC`,
+        [req.params.id]
+      )
+    ]);
+
+    res.json({ data: { rooms: rooms.rows, invitableUsers: users.rows } });
+  })
+);
+
 meetingsRouter.post(
   "/",
   requireRole("ORGANIZER"),
@@ -337,11 +376,13 @@ meetingsRouter.post(
       participantIds = [],
       participants = [],
       agenda = [],
+      speakerMode = "FREE",
       notes
     } = req.body;
     assertTimeRange(startTime, endTime);
     assertEnum(meetingType, MEETING_TYPES, "meeting type");
     assertEnum(onlineProvider, ONLINE_PROVIDERS, "online provider");
+    assertEnum(speakerMode, SPEAKER_MODES, "speaker mode");
 
     if (["OFFLINE", "HYBRID"].includes(meetingType) && !roomId) {
       throw badRequest("Cuộc họp tập trung cần chọn phòng họp vật lý");
@@ -360,11 +401,23 @@ meetingsRouter.post(
       if (!person.userId) throw badRequest("participants[].userId is required");
       assertEnum(person.roleInMeeting, MEETING_ROLES, "role in meeting");
     }
-    const secretaryCount = participantList.filter(
-      (person) => person.roleInMeeting === "SECRETARY"
-    ).length;
-    if (secretaryCount > 1) {
-      throw badRequest("Mỗi cuộc họp chỉ có một thư ký");
+    // Mỗi cuộc họp phải có đúng một chủ tọa và một thư ký. Người tạo chọn cả
+    // hai chứ không mặc nhiên là chủ tọa: văn phòng lập lịch cho trưởng khoa
+    // chủ tọa là chuyện bình thường, và hai vai này thay đổi theo từng cuộc họp.
+    const countRole = (value) =>
+      participantList.filter((person) => person.roleInMeeting === value).length;
+
+    if (countRole("SECRETARY") > 1) throw badRequest("Mỗi cuộc họp chỉ có một thư ký");
+    if (countRole("SECRETARY") === 0) throw badRequest("Cuộc họp phải chỉ định một thư ký");
+    if (countRole("CHAIRMAN") > 1) throw badRequest("Mỗi cuộc họp chỉ có một chủ tọa");
+    if (countRole("CHAIRMAN") === 0) throw badRequest("Cuộc họp phải chỉ định một chủ tọa");
+
+    const seen = new Set();
+    for (const person of participantList) {
+      if (seen.has(person.userId)) {
+        throw badRequest("Một người chỉ xuất hiện một lần trong thành phần tham dự");
+      }
+      seen.add(person.userId);
     }
 
     for (const item of agenda) {
@@ -393,8 +446,8 @@ meetingsRouter.post(
       const { rows } = await client.query(
         `INSERT INTO meetings
           (title, description, meeting_type, start_time, end_time, room_id,
-           organizer_id, online_provider, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           organizer_id, online_provider, notes, speaker_mode)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *`,
         [
           title.trim(),
@@ -405,7 +458,8 @@ meetingsRouter.post(
           roomId || null,
           req.user.id,
           onlineProvider,
-          notes || null
+          notes || null,
+          speakerMode
         ]
       );
 
@@ -423,24 +477,37 @@ meetingsRouter.post(
         created = updated.rows[0];
       }
 
-      for (const person of participantList) {
+      // Người tạo luôn nằm trong thành phần để theo dõi cuộc họp mình lập.
+      // Nếu họ đã tự nhận chủ tọa hoặc thư ký thì vòng lặp dưới xử lý, ở đây
+      // chỉ thêm khi họ không giữ vai nào.
+      const rosterList = seen.has(req.user.id)
+        ? participantList
+        : [...participantList, { userId: req.user.id, roleInMeeting: "MEMBER" }];
+
+      for (const person of rosterList) {
         const found = await client.query("SELECT id FROM users WHERE id = $1", [
           person.userId
         ]);
         if (!found.rows[0]) throw notFound(`User ${person.userId} not found`);
 
+        const isChair = person.roleInMeeting === "CHAIRMAN";
         await client.query(
           `INSERT INTO meeting_participants
-            (meeting_id, user_id, role_in_meeting, can_share_screen, can_upload_document, can_speak)
-           VALUES ($1, $2, COALESCE($3, 'MEMBER'), $4, $5, $6)
+            (meeting_id, user_id, role_in_meeting, invitation_status,
+             can_share_screen, can_upload_document, can_speak)
+           VALUES ($1, $2, COALESCE($3, 'MEMBER'), $4, $5, $6, $7)
            ON CONFLICT (meeting_id, user_id) DO NOTHING`,
           [
             created.id,
             person.userId,
             person.roleInMeeting || null,
-            Boolean(person.canShareScreen),
-            person.canUploadDocument !== false,
-            person.canSpeak !== false
+            // Chủ tọa là người điều hành nên không phải bấm nhận lời mời.
+            isChair ? "ACCEPTED" : "PENDING",
+            isChair ? true : Boolean(person.canShareScreen),
+            isChair ? true : person.canUploadDocument !== false,
+            // Họp có chủ tọa điều hành thì mặc định tắt mic mọi người ngay từ
+            // lúc tạo, không chờ tới khi chủ tọa bấm đổi chế độ.
+            isChair ? true : speakerMode === "MODERATED" ? false : person.canSpeak !== false
           ]
         );
         await client.query(
@@ -500,9 +567,8 @@ meetingsRouter.post(
 
 meetingsRouter.put(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    const meeting = await assertMeetingOrganizer(req.user, req.params.id);
+    const meeting = await assertMeetingScheduling(req.user, req.params.id);
     if (meeting.status === "FINISHED") {
       throw badRequest("Cuộc họp đã kết thúc nên không sửa được");
     }
@@ -622,9 +688,8 @@ meetingsRouter.put(
 
 meetingsRouter.put(
   "/:id/cancel",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.id);
+    await assertMeetingChairman(req.user, req.params.id);
     const { rows } = await pool.query(
       `UPDATE meetings SET status = 'CANCELLED', cancelled_at = now(), updated_at = now()
        WHERE id = $1
@@ -655,9 +720,8 @@ meetingsRouter.put(
 
 meetingsRouter.put(
   "/:id/start",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    const meeting = await assertMeetingOrganizer(req.user, req.params.id);
+    const meeting = await assertMeetingChairman(req.user, req.params.id);
     if (!["UPCOMING", "DRAFT"].includes(meeting.status)) {
       throw badRequest("Chỉ bắt đầu được cuộc họp đang ở trạng thái nháp hoặc sắp diễn ra");
     }
@@ -700,15 +764,193 @@ meetingsRouter.put(
 
 
 /**
+ * Trao quyền chủ tọa cho một người khác trong cuộc họp.
+ *
+ * Chủ tọa là vai trò trong cuộc họp chứ không phải quyền hệ thống, nên người
+ * nhận chỉ cần đang có mặt trong thành phần tham dự. Chủ tọa cũ lùi về thành
+ * viên để cuộc họp luôn có đúng một người điều hành.
+ */
+meetingsRouter.put(
+  "/:id/chairman",
+  asyncHandler(async (req, res) => {
+    const meeting = await assertMeetingScheduling(req.user, req.params.id);
+    requireFields(req.body, ["userId"]);
+    const { userId } = req.body;
+
+    const currentRole = await getMeetingRole(req.user, meeting);
+    if (currentRole === "CHAIRMAN" && userId === req.user.id) {
+      throw badRequest("Bạn đang là chủ tọa cuộc họp này");
+    }
+
+    const target = await pool.query(
+      `SELECT mp.role_in_meeting, u.full_name
+       FROM meeting_participants mp
+       JOIN users u ON u.id = mp.user_id
+       WHERE mp.meeting_id = $1 AND mp.user_id = $2`,
+      [req.params.id, userId]
+    );
+    if (!target.rows[0]) throw badRequest("Người này không có trong thành phần tham dự");
+    if (target.rows[0].role_in_meeting === "SECRETARY") {
+      throw badRequest("Thư ký không kiêm chủ tọa; hãy đổi thư ký trước");
+    }
+
+    await withTransaction(async (client) => {
+      // Hạ chủ tọa đang giữ vai (có thể không phải người bấm, khi người lập
+      // lịch đổi chủ tọa hộ) để cuộc họp luôn có đúng một người điều hành.
+      await client.query(
+        `UPDATE meeting_participants
+         SET role_in_meeting = 'MEMBER', updated_at = now()
+         WHERE meeting_id = $1 AND role_in_meeting = 'CHAIRMAN'`,
+        [req.params.id]
+      );
+      await client.query(
+        `UPDATE meeting_participants
+         SET role_in_meeting = 'CHAIRMAN', can_speak = TRUE,
+             can_share_screen = TRUE, can_upload_document = TRUE, updated_at = now()
+         WHERE meeting_id = $1 AND user_id = $2`,
+        [req.params.id, userId]
+      );
+    });
+
+    emitMeetingEvent(req.params.id, "chairman_changed", {
+      meetingId: req.params.id,
+      userId,
+      fullName: target.rows[0].full_name
+    });
+    await notifyUsers([userId], {
+      type: NOTIFICATION_TYPES.MEETING_UPDATED,
+      severity: "WARNING",
+      actorId: req.user.id,
+      meetingId: req.params.id,
+      title: `Bạn được trao quyền chủ tọa: ${meeting.title}`,
+      message: "Bạn điều hành chương trình, tài liệu, biểu quyết và quyền phát biểu."
+    });
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.MEETING_UPDATE,
+      entityType: "MEETING",
+      entityId: req.params.id,
+      meetingId: req.params.id,
+      description: `Trao quyền chủ tọa cho ${target.rows[0].full_name}`,
+      metadata: { newChairmanId: userId }
+    });
+
+    res.json({ data: { chairmanId: userId } });
+  })
+);
+
+/** Đổi giữa họp tự do phát biểu và họp có chủ tọa điều hành lượt nói. */
+meetingsRouter.put(
+  "/:id/speaker-mode",
+  asyncHandler(async (req, res) => {
+    await assertMeetingChairman(req.user, req.params.id);
+    requireFields(req.body, ["mode"]);
+    assertEnum(req.body.mode, SPEAKER_MODES, "speaker mode");
+
+    const { rows } = await pool.query(
+      `UPDATE meetings SET speaker_mode = $1, updated_at = now()
+       WHERE id = $2 RETURNING *`,
+      [req.body.mode, req.params.id]
+    );
+
+    // Chuyển sang có điều hành thì thu mic của tất cả trừ chủ tọa, để không ai
+    // đang nói dở lại tiếp tục nói khi luật chơi vừa đổi.
+    if (req.body.mode === "MODERATED") {
+      await pool.query(
+        `UPDATE meeting_participants
+         SET can_speak = FALSE, updated_at = now()
+         WHERE meeting_id = $1 AND role_in_meeting <> 'CHAIRMAN'`,
+        [req.params.id]
+      );
+      await pool.query(
+        "UPDATE meetings SET current_speaker_id = NULL WHERE id = $1",
+        [req.params.id]
+      );
+    }
+
+    emitMeetingEvent(req.params.id, "speaker_mode_updated", {
+      meetingId: req.params.id,
+      mode: req.body.mode
+    });
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.MEETING_UPDATE,
+      entityType: "MEETING",
+      entityId: req.params.id,
+      meetingId: req.params.id,
+      description:
+        req.body.mode === "MODERATED"
+          ? "Chuyển sang chế độ chủ tọa điều hành lượt phát biểu"
+          : "Chuyển sang chế độ tự do phát biểu",
+      metadata: { mode: req.body.mode }
+    });
+
+    res.json({ data: rows[0] });
+  })
+);
+
+/**
+ * Mời một người phát biểu (hoặc thu lượt khi truyền userId = null).
+ *
+ * Ở chế độ có điều hành, mời người mới đồng thời thu mic của người đang nói:
+ * đúng như ngoài đời, mỗi lúc chỉ một người có lượt.
+ */
+meetingsRouter.put(
+  "/:id/speaker",
+  asyncHandler(async (req, res) => {
+    const meeting = await assertMeetingChairman(req.user, req.params.id);
+    const userId = req.body.userId || null;
+
+    if (userId) {
+      const target = await pool.query(
+        `SELECT u.full_name FROM meeting_participants mp
+         JOIN users u ON u.id = mp.user_id
+         WHERE mp.meeting_id = $1 AND mp.user_id = $2`,
+        [req.params.id, userId]
+      );
+      if (!target.rows[0]) throw badRequest("Người này không có trong thành phần tham dự");
+    }
+
+    await withTransaction(async (client) => {
+      if (meeting.speaker_mode === "MODERATED") {
+        await client.query(
+          `UPDATE meeting_participants
+           SET can_speak = FALSE, updated_at = now()
+           WHERE meeting_id = $1 AND role_in_meeting <> 'CHAIRMAN'`,
+          [req.params.id]
+        );
+      }
+      if (userId) {
+        // Được mời thì coi như đã tới lượt: hạ tay luôn cho hàng đợi gọn.
+        await client.query(
+          `UPDATE meeting_participants
+           SET can_speak = TRUE, is_hand_raised = FALSE, hand_raised_at = NULL,
+               updated_at = now()
+           WHERE meeting_id = $1 AND user_id = $2`,
+          [req.params.id, userId]
+        );
+      }
+      await client.query("UPDATE meetings SET current_speaker_id = $1 WHERE id = $2", [
+        userId,
+        req.params.id
+      ]);
+    });
+
+    emitMeetingEvent(req.params.id, "speaker_updated", {
+      meetingId: req.params.id,
+      userId
+    });
+    res.json({ data: { currentSpeakerId: userId } });
+  })
+);
+
+/**
  * Bật / tắt phòng họp trực tuyến cho một cuộc họp đã tạo.
  * Cuộc họp tập trung (OFFLINE) khi bật phòng video sẽ thành HYBRID
  * mà vẫn giữ nguyên phòng vật lý, tài liệu, agenda, điểm danh đang có.
  */
 meetingsRouter.put(
   "/:id/online-room",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    const meeting = await assertMeetingOrganizer(req.user, req.params.id);
+    const meeting = await assertMeetingChairman(req.user, req.params.id);
     if (["FINISHED", "CANCELLED"].includes(meeting.status)) {
       throw badRequest("Cuộc họp đã kết thúc hoặc bị huỷ nên không đổi được phòng trực tuyến");
     }
@@ -797,9 +1039,8 @@ meetingsRouter.put(
 
 meetingsRouter.put(
   "/:id/finish",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    const meeting = await assertMeetingOrganizer(req.user, req.params.id);
+    const meeting = await assertMeetingChairman(req.user, req.params.id);
     if (meeting.status !== "ONGOING") {
       throw badRequest("Chỉ kết thúc được cuộc họp đang diễn ra");
     }
@@ -832,9 +1073,8 @@ meetingsRouter.put(
 
 meetingsRouter.delete(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    const meeting = await assertMeetingOrganizer(req.user, req.params.id);
+    const meeting = await assertMeetingScheduling(req.user, req.params.id);
     if (meeting.status === "FINISHED") {
       throw badRequest("Cuộc họp đã kết thúc nên không xoá được");
     }

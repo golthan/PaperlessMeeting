@@ -1,16 +1,22 @@
 import express from "express";
-import { pool } from "../../config/db.js";
+import { pool, withTransaction } from "../../config/db.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
-import { requireRole } from "../../middlewares/role.middleware.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { badRequest, notFound } from "../../utils/httpError.js";
 import { formatMeetingTime } from "../../utils/datetime.js";
-import { assertEnum, INVITATION_STATUSES } from "../../utils/validators.js";
+import {
+  assertEnum,
+  INVITATION_STATUSES,
+  requireFields
+} from "../../utils/validators.js";
 import {
   assertMeetingAccess,
-  assertMeetingOrganizer,
+  assertMeetingChairman,
+  assertMeetingScheduling,
+  assertMeetingSecretaryDuties,
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
+import { emitMeetingEvent } from "../../config/socket.js";
 import { NOTIFICATION_TYPES, notifyUsers } from "../notifications/notifications.service.js";
 import { AUDIT_ACTIONS, writeAuditLog } from "../audit/audit.service.js";
 
@@ -30,7 +36,16 @@ async function updateMyInvitation(user, meetingId, status) {
     [status, meetingId, user.id]
   );
 
-  await notifyUsers([meeting.organizer_id], {
+  // Thư ký lo thành phần tham dự nên phải biết ai nhận lời, ai từ chối;
+  // chủ tọa cũng cần nắm để điều chỉnh chương trình.
+  const leaders = await pool.query(
+    `SELECT user_id FROM meeting_participants
+     WHERE meeting_id = $1 AND role_in_meeting IN ('CHAIRMAN', 'SECRETARY')`,
+    [meetingId]
+  );
+  const leaderIds = leaders.rows.map((row) => row.user_id);
+
+  await notifyUsers([...leaderIds, meeting.organizer_id], {
     type: NOTIFICATION_TYPES.INVITATION_RESPONSE,
     severity: status === "ACCEPTED" ? "SUCCESS" : "WARNING",
     meetingId,
@@ -66,9 +81,8 @@ participantsRouter.get(
 
 participantsRouter.post(
   "/",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    const meeting = await assertMeetingOrganizer(req.user, req.params.meetingId);
+    const meeting = await assertMeetingSecretaryDuties(req.user, req.params.meetingId);
     if (meeting.status === "FINISHED") {
       throw badRequest("Cannot add participants to a finished meeting");
     }
@@ -140,9 +154,8 @@ participantsRouter.post(
 
 participantsRouter.delete(
   "/:userId",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    const meeting = await assertMeetingOrganizer(req.user, req.params.meetingId);
+    const meeting = await assertMeetingSecretaryDuties(req.user, req.params.meetingId);
     if (meeting.status === "FINISHED") {
       throw badRequest("Cannot remove participants from a finished meeting");
     }
@@ -176,26 +189,25 @@ participantsRouter.delete(
   })
 );
 
+/**
+ * Quyền hành chính của một người dự: chia sẻ màn hình và gửi tài liệu.
+ * Thư ký phụ trách vì đây là phần kiểm soát thành viên.
+ */
 participantsRouter.put(
-  "/:userId",
-  requireRole("ORGANIZER"),
+  "/:userId/permissions",
   asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.meetingId);
+    await assertMeetingSecretaryDuties(req.user, req.params.meetingId);
 
     const { rows } = await pool.query(
       `UPDATE meeting_participants
-       SET role_in_meeting = COALESCE($1, role_in_meeting),
-           can_share_screen = COALESCE($2, can_share_screen),
-           can_upload_document = COALESCE($3, can_upload_document),
-           can_speak = COALESCE($4, can_speak),
+       SET can_share_screen = COALESCE($1, can_share_screen),
+           can_upload_document = COALESCE($2, can_upload_document),
            updated_at = now()
-       WHERE meeting_id = $5 AND user_id = $6
+       WHERE meeting_id = $3 AND user_id = $4
        RETURNING *`,
       [
-        req.body.roleInMeeting || null,
         req.body.canShareScreen === undefined ? null : Boolean(req.body.canShareScreen),
         req.body.canUploadDocument === undefined ? null : Boolean(req.body.canUploadDocument),
-        req.body.canSpeak === undefined ? null : Boolean(req.body.canSpeak),
         req.params.meetingId,
         req.params.userId
       ]
@@ -205,9 +217,97 @@ participantsRouter.put(
   })
 );
 
+/**
+ * Quyền phát biểu: việc của chủ tọa vì nó quyết định ai được nói trong cuộc họp.
+ * Thu quyền của người đang giữ lượt thì xoá luôn lượt đó.
+ */
+participantsRouter.put(
+  "/:userId/speak",
+  asyncHandler(async (req, res) => {
+    await assertMeetingChairman(req.user, req.params.meetingId);
+    if (req.body.canSpeak === undefined) throw badRequest("Thiếu canSpeak");
+    const canSpeak = Boolean(req.body.canSpeak);
+
+    const { rows } = await pool.query(
+      `UPDATE meeting_participants
+       SET can_speak = $1, updated_at = now()
+       WHERE meeting_id = $2 AND user_id = $3
+       RETURNING *`,
+      [canSpeak, req.params.meetingId, req.params.userId]
+    );
+    if (!rows[0]) throw notFound("Participant not found");
+
+    if (!canSpeak) {
+      await pool.query(
+        `UPDATE meetings SET current_speaker_id = NULL
+         WHERE id = $1 AND current_speaker_id = $2`,
+        [req.params.meetingId, req.params.userId]
+      );
+    }
+
+    emitMeetingEvent(req.params.meetingId, "speak_permission_updated", {
+      meetingId: req.params.meetingId,
+      userId: req.params.userId,
+      canSpeak
+    });
+    res.json({ data: rows[0] });
+  })
+);
+
+/**
+ * Đổi vai trò trong cuộc họp (chủ yếu là chỉ định thư ký).
+ * Chủ tọa quyết định, và mỗi cuộc họp chỉ giữ đúng một thư ký.
+ */
+participantsRouter.put(
+  "/:userId/role",
+  asyncHandler(async (req, res) => {
+    await assertMeetingScheduling(req.user, req.params.meetingId);
+    requireFields(req.body, ["roleInMeeting"]);
+    const role = req.body.roleInMeeting;
+    if (!["SECRETARY", "MEMBER"].includes(role)) {
+      throw badRequest("Chỉ đặt được vai trò Thư ký hoặc Thành viên tại đây");
+    }
+    if (req.params.userId === req.user.id) {
+      throw badRequest("Không tự đổi vai trò của chính mình");
+    }
+
+    const updated = await withTransaction(async (client) => {
+      if (role === "SECRETARY") {
+        await client.query(
+          `UPDATE meeting_participants
+           SET role_in_meeting = 'MEMBER', updated_at = now()
+           WHERE meeting_id = $1 AND role_in_meeting = 'SECRETARY'`,
+          [req.params.meetingId]
+        );
+      }
+      const { rows } = await client.query(
+        `UPDATE meeting_participants
+         SET role_in_meeting = $1, updated_at = now()
+         WHERE meeting_id = $2 AND user_id = $3
+         RETURNING *`,
+        [role, req.params.meetingId, req.params.userId]
+      );
+      return rows[0];
+    });
+    if (!updated) throw notFound("Participant not found");
+
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.PARTICIPANT_UPDATE,
+      entityType: "MEETING",
+      entityId: req.params.meetingId,
+      meetingId: req.params.meetingId,
+      description: `Đổi vai trò trong cuộc họp thành ${
+        role === "SECRETARY" ? "Thư ký" : "Thành viên"
+      }`,
+      metadata: { targetUserId: req.params.userId, roleInMeeting: role }
+    });
+
+    res.json({ data: updated });
+  })
+);
+
 participantsRouter.put(
   "/invitation/accept",
-  requireRole("PARTICIPANT"),
   asyncHandler(async (req, res) => {
     res.json({
       data: await updateMyInvitation(req.user, req.params.meetingId, "ACCEPTED")
@@ -217,7 +317,6 @@ participantsRouter.put(
 
 participantsRouter.put(
   "/invitation/decline",
-  requireRole("PARTICIPANT"),
   asyncHandler(async (req, res) => {
     res.json({
       data: await updateMyInvitation(req.user, req.params.meetingId, "DECLINED")
@@ -227,7 +326,6 @@ participantsRouter.put(
 
 invitationRouter.put(
   "/accept",
-  requireRole("PARTICIPANT"),
   asyncHandler(async (req, res) => {
     res.json({
       data: await updateMyInvitation(req.user, req.params.meetingId, "ACCEPTED")
@@ -237,7 +335,6 @@ invitationRouter.put(
 
 invitationRouter.put(
   "/decline",
-  requireRole("PARTICIPANT"),
   asyncHandler(async (req, res) => {
     res.json({
       data: await updateMyInvitation(req.user, req.params.meetingId, "DECLINED")
@@ -247,9 +344,8 @@ invitationRouter.put(
 
 participantsRouter.put(
   "/:userId/invitation",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.meetingId);
+    await assertMeetingSecretaryDuties(req.user, req.params.meetingId);
     assertEnum(req.body.status, INVITATION_STATUSES, "invitation status");
 
     const { rows } = await pool.query(

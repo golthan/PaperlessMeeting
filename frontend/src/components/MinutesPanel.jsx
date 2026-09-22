@@ -2,6 +2,7 @@ import {
   Download,
   ExternalLink,
   FileSignature,
+  MessagesSquare,
   RefreshCw,
   Save,
   Send,
@@ -19,15 +20,27 @@ import { formatDateTime } from "../utils/format.js";
 /**
  * Hồ sơ biên bản của một cuộc họp.
  *
- * Quy trình: tự sinh nội dung từ dữ liệu cuộc họp → chủ trì rà soát và bổ sung
- * kết luận → chủ trì và thư ký ký số → ban hành. Sau khi có chữ ký, nội dung bị
+ * Quy trình: tự sinh nội dung từ dữ liệu cuộc họp → chủ tọa rà soát và bổ sung
+ * kết luận → chủ tọa và thư ký ký số → ban hành. Sau khi có chữ ký, nội dung bị
  * khoá; muốn sửa phải gỡ chữ ký (thao tác này được ghi vào nhật ký truy vết).
  */
-export function MinutesPanel({ meetingId, isOrganizer, canSign, onNotice, onError }) {
+export function MinutesPanel({
+  meetingId,
+  isOrganizer,
+  canSign,
+  canDraft = false,
+  onNotice,
+  onError
+}) {
   const [minutes, setMinutes] = useState(null);
   const [content, setContent] = useState("");
   const [conclusion, setConclusion] = useState("");
   const [dirty, setDirty] = useState(false);
+  // Mục "Diễn biến và ý kiến thảo luận" là phần duy nhất bộ tự sinh không lắp
+  // ráp được từ dữ liệu có cấu trúc, nên có AI tổng hợp riêng từ chat phòng họp.
+  const [notes, setNotes] = useState(null);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [summarizing, setSummarizing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -46,9 +59,56 @@ export function MinutesPanel({ meetingId, isOrganizer, canSign, onNotice, onErro
     }
   }, [meetingId, onError]);
 
+  const loadNotes = useCallback(async () => {
+    try {
+      const res = await api.get(`/meetings/${meetingId}/public-notes`);
+      setNotes(res.data.data);
+    } catch {
+      setNotes(null);
+    }
+  }, [meetingId]);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadNotes();
+  }, [load, loadNotes]);
+
+  useEffect(() => {
+    api
+      .get("/documents/ai/status")
+      .then((res) => setAiEnabled(Boolean(res.data.data?.configured)))
+      .catch(() => setAiEnabled(false));
+  }, []);
+
+  /** AI đọc chat phòng họp, dựng bản nháp mục diễn biến thảo luận. */
+  async function summarizeDiscussion() {
+    setSummarizing(true);
+    try {
+      const res = await api.post(`/meetings/${meetingId}/public-notes/ai-summary`);
+      setNotes(res.data.data);
+      onNotice?.("AI đã tổng hợp xong ý kiến thảo luận");
+    } catch (err) {
+      onError?.(err.response?.data?.message || "Không tổng hợp được thảo luận");
+    } finally {
+      setSummarizing(false);
+    }
+  }
+
+  /**
+   * Đưa bản nháp của AI thành ghi chú chung — đây là thao tác người dùng xác
+   * nhận đã đọc, sau đó bộ sinh biên bản mới lấy nội dung này vào mục VI.
+   */
+  async function useSummaryAsNotes() {
+    try {
+      const res = await api.put(`/meetings/${meetingId}/public-notes`, {
+        content: notes.ai_summary
+      });
+      setNotes((current) => ({ ...current, content: res.data.data.content }));
+      onNotice?.("Đã đưa bản tổng hợp vào ghi chú chung của cuộc họp");
+    } catch (err) {
+      onError?.(err.response?.data?.message || "Không lưu được ghi chú chung");
+    }
+  }
 
   async function run(action, success) {
     setBusy(true);
@@ -136,6 +196,17 @@ export function MinutesPanel({ meetingId, isOrganizer, canSign, onNotice, onErro
           )}
         </div>
         <div className="row-actions">
+          {canDraft && aiEnabled && !signed && !published && (
+            <button
+              className="secondary-button"
+              onClick={summarizeDiscussion}
+              disabled={summarizing || busy}
+              title="AI đọc toàn bộ trao đổi trong phòng họp và dựng mục diễn biến thảo luận"
+            >
+              <MessagesSquare size={16} />
+              {summarizing ? "Đang tổng hợp..." : "AI tổng hợp thảo luận"}
+            </button>
+          )}
           {isOrganizer && !signed && !published && (
             <button className="secondary-button" onClick={generate} disabled={busy}>
               <Sparkles size={16} />
@@ -150,6 +221,31 @@ export function MinutesPanel({ meetingId, isOrganizer, canSign, onNotice, onErro
           )}
         </div>
       </div>
+
+      {notes?.ai_summary && (
+        <div className="ai-discussion">
+          <div className="ai-discussion-head">
+            <strong>
+              <MessagesSquare size={15} /> Bản tổng hợp thảo luận của AI
+            </strong>
+            <span className="muted small">
+              {notes.ai_summary_message_count || 0} ý kiến ·{" "}
+              {formatDateTime(notes.ai_summary_updated_at)}
+            </span>
+          </div>
+          <p className="muted small">
+            Đây là <strong>bản nháp</strong>. Biên bản có ký số nên hãy đọc lại rồi mới đưa
+            vào — mục VI của biên bản lấy từ ghi chú chung.
+          </p>
+          <pre className="ai-discussion-body">{notes.ai_summary}</pre>
+          {canDraft && (
+            <button className="secondary-button" onClick={useSummaryAsNotes}>
+              <Send size={15} />
+              Dùng làm ghi chú chung
+            </button>
+          )}
+        </div>
+      )}
 
       {!minutes ? (
         <EmptyState
@@ -185,7 +281,7 @@ export function MinutesPanel({ meetingId, isOrganizer, canSign, onNotice, onErro
           </label>
 
           <label className="minutes-field">
-            Kết luận của chủ trì
+            Kết luận của chủ tọa
             <textarea
               value={conclusion}
               onChange={(event) => {
@@ -240,7 +336,7 @@ export function MinutesPanel({ meetingId, isOrganizer, canSign, onNotice, onErro
             </h3>
             {!signed ? (
               <p className="muted small">
-                Chưa có chữ ký. Chủ trì và thư ký của cuộc họp ký số ngay trên hệ thống,
+                Chưa có chữ ký. Chủ tọa và thư ký của cuộc họp ký số ngay trên hệ thống,
                 mỗi chữ ký gắn với mã băm SHA-256 của nội dung tại thời điểm ký.
               </p>
             ) : (

@@ -87,9 +87,8 @@ export function percent(count, total) {
 
 /** Cách một người được ghi nhận điểm danh. */
 export function attendanceMethodLabel(method) {
-  if (method === "QR") return "Quét QR";
   if (method === "JOIN_ROOM") return "Vào phòng họp";
-  if (method === "MANUAL") return "Chủ trì ghi nhận";
+  if (method === "MANUAL") return "Bấm điểm danh";
   return "-";
 }
 

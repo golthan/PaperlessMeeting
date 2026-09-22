@@ -23,7 +23,6 @@ async function run() {
       minutes,
       meeting_tasks,
       attendance,
-      attendance_tokens,
       agenda_items,
       documents,
       meeting_participants,

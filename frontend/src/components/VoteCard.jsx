@@ -7,7 +7,7 @@ import { StatusPill } from "./StatusPill.jsx";
  * Thẻ biểu quyết dùng chung cho trang chi tiết cuộc họp và phòng họp.
  *
  * Khi phiên còn mở chỉ hiển thị tiến độ bỏ phiếu để tránh tâm lý theo số đông;
- * chốt xong mới hiện phân bố phiếu. Chủ trì có thể xem kết quả tạm tính.
+ * chốt xong mới hiện phân bố phiếu. Chủ tọa có thể xem kết quả tạm tính.
  */
 export function VoteCard({
   vote,
@@ -71,7 +71,7 @@ export function VoteCard({
         </p>
       )}
       {canVote && vote.status === "DRAFT" && (
-        <p className="muted small">Biểu quyết chưa mở, hãy chờ chủ trì.</p>
+        <p className="muted small">Biểu quyết chưa mở, hãy chờ chủ tọa.</p>
       )}
 
       {showResults && result?.results && (

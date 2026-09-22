@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS meeting_participants (
   CONSTRAINT meeting_participants_role_check CHECK (role_in_meeting IN ('CHAIRMAN', 'SECRETARY', 'MEMBER')),
   CONSTRAINT meeting_participants_invitation_check CHECK (invitation_status IN ('PENDING', 'ACCEPTED', 'DECLINED')),
   CONSTRAINT meeting_participants_attendance_check CHECK (attendance_status IS NULL OR attendance_status IN ('PRESENT', 'ABSENT', 'LATE')),
-  CONSTRAINT meeting_participants_method_check CHECK (attendance_method IS NULL OR attendance_method IN ('QR', 'MANUAL', 'JOIN_ROOM'))
+  CONSTRAINT meeting_participants_method_check CHECK (attendance_method IS NULL OR attendance_method IN ('MANUAL', 'JOIN_ROOM'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_meeting_participants_user ON meeting_participants(user_id);
@@ -136,15 +136,6 @@ CREATE TABLE IF NOT EXISTS agenda_items (
 
 CREATE INDEX IF NOT EXISTS idx_agenda_meeting_order ON agenda_items(meeting_id, sort_order);
 
-CREATE TABLE IF NOT EXISTS attendance_tokens (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
-  token TEXT NOT NULL UNIQUE,
-  expires_at TIMESTAMPTZ,
-  created_by UUID NOT NULL REFERENCES users(id),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
 CREATE TABLE IF NOT EXISTS attendance (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
@@ -155,7 +146,7 @@ CREATE TABLE IF NOT EXISTS attendance (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ,
   UNIQUE (meeting_id, user_id),
-  CONSTRAINT attendance_method_check CHECK (method IN ('QR', 'MANUAL', 'JOIN_ROOM')),
+  CONSTRAINT attendance_method_check CHECK (method IN ('MANUAL', 'JOIN_ROOM')),
   CONSTRAINT attendance_status_check CHECK (status IN ('PRESENT', 'ABSENT', 'LATE'))
 );
 
@@ -428,8 +419,15 @@ BEGIN
   ALTER TABLE meetings ADD CONSTRAINT meetings_provider_check CHECK (online_provider IN ('LIVEKIT', 'CUSTOM'));
   ALTER TABLE votes DROP CONSTRAINT IF EXISTS votes_status_check;
   ALTER TABLE votes ADD CONSTRAINT votes_status_check CHECK (status IN ('DRAFT', 'OPEN', 'CLOSED'));
+  -- Bo diem danh bang ma QR: du lieu cu ghi nhan 'QR' chuyen ve 'MANUAL'
+  -- (van la nguoi tham du tu diem danh), roi moi siet lai rang buoc.
   ALTER TABLE meeting_participants DROP CONSTRAINT IF EXISTS meeting_participants_method_check;
-  ALTER TABLE meeting_participants ADD CONSTRAINT meeting_participants_method_check CHECK (attendance_method IS NULL OR attendance_method IN ('QR', 'MANUAL', 'JOIN_ROOM'));
+  UPDATE meeting_participants SET attendance_method = 'MANUAL' WHERE attendance_method = 'QR';
+  ALTER TABLE meeting_participants ADD CONSTRAINT meeting_participants_method_check CHECK (attendance_method IS NULL OR attendance_method IN ('MANUAL', 'JOIN_ROOM'));
+  ALTER TABLE attendance DROP CONSTRAINT IF EXISTS attendance_method_check;
+  UPDATE attendance SET method = 'MANUAL' WHERE method = 'QR';
+  ALTER TABLE attendance ADD CONSTRAINT attendance_method_check CHECK (method IN ('MANUAL', 'JOIN_ROOM'));
+  DROP TABLE IF EXISTS attendance_tokens;
   UPDATE meetings SET online_enabled_at = COALESCE(online_enabled_at, updated_at, created_at) WHERE meeting_type IN ('ONLINE', 'HYBRID') AND online_room_name IS NOT NULL;
   ALTER TABLE agenda_items DROP CONSTRAINT IF EXISTS agenda_status_check;
   ALTER TABLE agenda_items ADD CONSTRAINT agenda_status_check CHECK (status IN ('PENDING', 'CURRENT', 'DONE'));
@@ -459,3 +457,80 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+
+-- ============================================================
+-- Tách vai trò trong cuộc họp: CHỦ TỌA và THƯ KÝ
+--
+-- Trước đây mọi quyền điều hành gắn vào `meetings.organizer_id`
+-- nên một người ôm tất cả. Nay quyền gắn vào
+-- `meeting_participants.role_in_meeting`:
+--   - CHAIRMAN  điều hành nội dung: chương trình, tài liệu,
+--               biểu quyết, quyền phát biểu, ban hành biên bản.
+--   - SECRETARY lo hành chính: mời người, điểm danh, nhiệm vụ,
+--               soạn biên bản.
+-- Nhờ vậy một tài khoản Participant cũng có thể được cử làm
+-- chủ tọa hoặc thư ký của một cuộc họp cụ thể.
+-- ============================================================
+
+-- Chế độ phát biểu trong phòng trực tuyến:
+--   FREE      ai cũng tự bật mic (như trước).
+--   MODERATED mặc định tắt mic, phải được chủ tọa mời mới nói được.
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS speaker_mode VARCHAR(20) NOT NULL DEFAULT 'FREE';
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS current_speaker_id UUID REFERENCES users(id) ON DELETE SET NULL;
+
+-- Giơ tay xếp theo thứ tự để chủ tọa mời đúng người đã chờ lâu nhất.
+ALTER TABLE meeting_participants ADD COLUMN IF NOT EXISTS hand_raised_at TIMESTAMPTZ;
+
+DO $$
+BEGIN
+  ALTER TABLE meetings DROP CONSTRAINT IF EXISTS meetings_speaker_mode_check;
+  ALTER TABLE meetings ADD CONSTRAINT meetings_speaker_mode_check
+    CHECK (speaker_mode IN ('FREE', 'MODERATED'));
+
+  -- Cuộc họp tạo trước thay đổi này chưa có hàng chủ tọa: cấp cho người tạo,
+  -- kèm đủ quyền điều hành. Không đụng tới cuộc họp đã có chủ tọa.
+  INSERT INTO meeting_participants
+    (meeting_id, user_id, role_in_meeting, invitation_status,
+     can_share_screen, can_upload_document, can_speak)
+  SELECT m.id, m.organizer_id, 'CHAIRMAN', 'ACCEPTED', TRUE, TRUE, TRUE
+  FROM meetings m
+  WHERE m.deleted_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM meeting_participants mp
+      WHERE mp.meeting_id = m.id AND mp.role_in_meeting = 'CHAIRMAN'
+    )
+  ON CONFLICT (meeting_id, user_id) DO UPDATE
+    SET role_in_meeting = 'CHAIRMAN',
+        can_share_screen = TRUE,
+        can_upload_document = TRUE,
+        can_speak = TRUE;
+
+  -- Giữ dòng điểm danh song song cho chủ tọa vừa được cấp.
+  INSERT INTO attendance (meeting_id, user_id)
+  SELECT mp.meeting_id, mp.user_id
+  FROM meeting_participants mp
+  WHERE mp.role_in_meeting = 'CHAIRMAN'
+  ON CONFLICT (meeting_id, user_id) DO NOTHING;
+
+  -- Giơ tay đang bật nhưng chưa có mốc thời gian thì lấy tạm lúc cập nhật gần nhất.
+  UPDATE meeting_participants
+  SET hand_raised_at = COALESCE(updated_at, created_at)
+  WHERE is_hand_raised = TRUE AND hand_raised_at IS NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_meeting_participants_role
+  ON meeting_participants(meeting_id, role_in_meeting);
+
+-- ============================================================
+-- AI tổng hợp thảo luận thành mục "Diễn biến và ý kiến" của biên bản.
+--
+-- Bộ tự sinh biên bản lắp ráp được mọi mục từ dữ liệu có cấu trúc, trừ
+-- mục diễn biến thảo luận: ý kiến nằm trong chat dạng văn xuôi. Bản
+-- tóm tắt của AI lưu TÁCH RIÊNG khỏi `content` (ghi chú chung do thư ký
+-- viết) để luôn phân biệt được đâu là bản nháp máy dựng, đâu là nội dung
+-- người đã rà soát và chịu trách nhiệm.
+-- ============================================================
+ALTER TABLE meeting_notes ADD COLUMN IF NOT EXISTS ai_summary TEXT;
+ALTER TABLE meeting_notes ADD COLUMN IF NOT EXISTS ai_summary_model VARCHAR(80);
+ALTER TABLE meeting_notes ADD COLUMN IF NOT EXISTS ai_summary_updated_at TIMESTAMPTZ;
+ALTER TABLE meeting_notes ADD COLUMN IF NOT EXISTS ai_summary_message_count INTEGER;

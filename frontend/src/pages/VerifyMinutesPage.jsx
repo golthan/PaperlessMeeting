@@ -120,7 +120,7 @@ export function VerifyMinutesPage() {
                 <dd>{formatDateTime(result.meetingStartTime)}</dd>
               </div>
               <div>
-                <dt>Chủ trì</dt>
+                <dt>Chủ tọa</dt>
                 <dd>{result.organizerName}</dd>
               </div>
               <div>

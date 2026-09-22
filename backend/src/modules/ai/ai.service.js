@@ -84,6 +84,32 @@ function buildDocumentBlock(document, { withCitations = false } = {}) {
  * dự phòng trong cùng lời gọi. Nếu tài khoản chưa bật beta này thì API trả 400,
  * lúc đó thử lại một lần không kèm tham số dự phòng để tính năng vẫn chạy.
  */
+/**
+ * Đổi lỗi thô của SDK thành thông báo người dùng hiểu được.
+ *
+ * Không làm việc này thì khoá sai sẽ đẩy nguyên khối JSON của Anthropic ra
+ * giao diện, người dùng không biết phải sửa ở đâu.
+ */
+function friendlyAiError(error) {
+  const status = error?.status;
+  if (status === 401 || status === 403) {
+    return badRequest(
+      "ANTHROPIC_API_KEY không hợp lệ. Kiểm tra lại khoá trong backend/.env " +
+        "(khoá thật có dạng sk-ant-api03-...) rồi khởi động lại backend."
+    );
+  }
+  if (status === 429) {
+    return badRequest("Đã chạm giới hạn gọi API của Anthropic, thử lại sau ít phút");
+  }
+  if (status === 402) {
+    return badRequest("Tài khoản Anthropic hết hạn mức, cần nạp thêm để dùng tính năng AI");
+  }
+  if (error instanceof Anthropic.APIConnectionError) {
+    return badRequest("Không kết nối được tới Anthropic, kiểm tra đường truyền mạng");
+  }
+  return error;
+}
+
 async function callClaude(params) {
   const client = getClient();
   try {
@@ -97,8 +123,13 @@ async function callClaude(params) {
     const isFallbackIssue =
       error instanceof Anthropic.BadRequestError &&
       /fallback|beta/i.test(message);
-    if (!isFallbackIssue) throw error;
-    return client.messages.create(params);
+    if (!isFallbackIssue) throw friendlyAiError(error);
+
+    try {
+      return await client.messages.create(params);
+    } catch (retryError) {
+      throw friendlyAiError(retryError);
+    }
   }
 }
 
@@ -148,6 +179,22 @@ Yêu cầu:
 - Nếu tài liệu có nội dung cần biểu quyết hoặc cần xin ý kiến, nêu rõ ở cuối.
 - Chỉ dùng thông tin có trong tài liệu, không suy diễn thêm.`;
 
+const DISCUSSION_SYSTEM = `Bạn là thư ký cuộc họp của một cơ quan nhà nước Việt Nam.
+Nhiệm vụ: đọc toàn bộ trao đổi trong phòng họp và dựng phần "Diễn biến và ý kiến thảo luận"
+của biên bản.
+Yêu cầu:
+- Viết bằng tiếng Việt, văn phong hành chính, xưng hô trung lập (không dùng "tôi", "bạn").
+- Gom ý kiến theo CHỦ ĐỀ, không thuật lại từng tin nhắn theo thứ tự thời gian.
+- Trình bày đúng bốn mục sau, mỗi mục là một đề mục in đậm:
+  **Các nội dung đã trao đổi** - mỗi chủ đề một gạch đầu dòng, nêu rõ ai nêu ý kiến gì.
+  **Điểm đã thống nhất** - những việc mọi người đồng thuận.
+  **Điểm còn ý kiến khác nhau** - nêu các luồng ý kiến trái chiều và người đại diện từng luồng.
+  **Việc cần làm tiếp** - đề xuất nhiệm vụ hoặc nội dung cần quyết định, nếu có.
+- Mục nào không có dữ liệu thì ghi "Không có".
+- CHỈ dùng thông tin có trong trao đổi. Tuyệt đối không suy diễn, không thêm kết luận
+  mà không ai nói ra, không bịa số liệu.
+- Nêu đúng tên người phát biểu như trong bản ghi.`;
+
 const ASK_SYSTEM = `Bạn là trợ lý tra cứu tài liệu trong phòng họp.
 Trả lời câu hỏi của đại biểu chỉ dựa trên nội dung tài liệu được cung cấp.
 Yêu cầu:
@@ -171,6 +218,63 @@ export async function summarizeDocument(document) {
           {
             type: "text",
             text: `Tóm tắt tài liệu "${document.display_name}" phục vụ cuộc họp.`
+          }
+        ]
+      }
+    ]
+  });
+
+  assertNotRefused(response);
+  return { summary: extractText(response), model: response.model };
+}
+
+/**
+ * Tổng hợp thảo luận trong phòng họp thành phần "Diễn biến và ý kiến" của biên bản.
+ *
+ * Đây là phần duy nhất của biên bản mà bộ tự sinh không lắp ráp được: ý kiến nằm
+ * rải rác trong chat dạng văn xuôi, không có cấu trúc để đếm hay xếp bảng.
+ * Kết quả luôn là BẢN NHÁP — thư ký đọc lại rồi mới đưa vào biên bản, vì biên bản
+ * có ký số và giá trị pháp lý.
+ */
+export async function summarizeDiscussion({ meeting, agenda = [], messages }) {
+  const transcript = messages
+    .map((item) => {
+      const at = item.created_at
+        ? new Date(item.created_at).toLocaleTimeString("vi-VN", {
+            hour: "2-digit",
+            minute: "2-digit"
+          })
+        : "";
+      return `[${at}] ${item.sender_name || item.sender_email}: ${item.content}`;
+    })
+    .join("\n");
+
+  // Chương trình nghị sự giúp mô hình gom ý kiến đúng theo từng nội dung đã định.
+  const agendaBlock = agenda.length
+    ? `Chương trình nghị sự:\n${agenda
+        .map((item, index) => `${index + 1}. ${item.title}`)
+        .join("\n")}\n\n`
+    : "";
+
+  const response = await callClaude({
+    model: env.aiModel,
+    max_tokens: 16000,
+    system: DISCUSSION_SYSTEM,
+    // Gom ý kiến trái chiều cần suy luận kỹ hơn tóm tắt tài liệu.
+    output_config: { effort: "medium" },
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              `Cuộc họp: "${meeting.title}"\n` +
+              (meeting.description ? `Nội dung chính: ${meeting.description}\n` : "") +
+              "\n" +
+              agendaBlock +
+              `Bản ghi trao đổi trong phòng họp (${messages.length} tin nhắn):\n` +
+              transcript
           }
         ]
       }

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import { useAuth } from "../auth/AuthContext.jsx";
 import { useNotifications } from "../notifications/NotificationContext.jsx";
 import { NotificationBell } from "./NotificationBell.jsx";
@@ -65,10 +66,12 @@ function initials(user) {
 function pageTitle(pathname) {
   if (pathname.includes("profile")) return "Hồ sơ cá nhân";
   if (pathname.includes("notifications")) return "Thông báo";
+  if (pathname.includes("audit-logs")) return "Nhật ký truy vết";
   if (pathname.includes("users")) return "Quản lý người dùng";
   if (pathname.includes("departments")) return "Quản lý phòng ban";
   if (pathname.includes("rooms")) return "Quản lý phòng họp";
   if (pathname.includes("/live")) return "Phòng họp trực tuyến";
+  if (/\/meetings\/[^/]+$/.test(pathname)) return "Chi tiết cuộc họp";
   if (pathname.includes("meetings")) return "Quản lý cuộc họp";
   if (pathname.includes("tasks")) return "Nhiệm vụ của tôi";
   return "Dashboard";
@@ -155,7 +158,10 @@ export function Layout() {
             </button>
           </div>
         </header>
-        <Outlet />
+        {/* Một trang lỗi không được phép làm trắng cả ứng dụng. */}
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );

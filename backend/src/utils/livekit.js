@@ -21,7 +21,7 @@ export async function createLiveRoomToken({ roomName, user, permissions }) {
   const grant = {
     room: roomName,
     roomJoin: true,
-    roomAdmin: Boolean(permissions.isOrganizer),
+    roomAdmin: Boolean(permissions.isChairman),
     canSubscribe: true,
     canPublish: permissions.canSpeak !== false,
     canPublishData: true

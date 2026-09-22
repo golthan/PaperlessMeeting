@@ -118,8 +118,9 @@ export function LiveMeetingPage() {
   const socketRef = useRef(null);
   const fetchedResultsRef = useRef(new Set());
 
-  const isOrganizer = user.role === "ORGANIZER";
-  const isParticipant = user.role === "PARTICIPANT";
+  // Quyền do máy chủ tính theo vai trò TRONG cuộc họp (chủ tọa / thư ký / thành viên),
+  // không suy từ vai trò toàn cục nữa.
+  const perm = config?.permissions || {};
   const liveBackPath =
     user.role === "ORGANIZER" ? `/organizer/meetings/${id}` : `/participant/meetings/${id}`;
 
@@ -247,11 +248,43 @@ export function LiveMeetingPage() {
       if (nextMeeting.status === "FINISHED") setNotice("Cuộc họp đã kết thúc");
       if (nextMeeting.status === "CANCELLED") setError("Cuộc họp đã bị huỷ");
     });
-    // Chủ trì bật / tắt phòng video: phải lấy lại token LiveKit mới.
+    // Chủ tọa bật / tắt phòng video: phải lấy lại token LiveKit mới.
     socket.on("online_room_updated", ({ enabled }) => {
       setNotice(
-        enabled ? "Chủ trì đã mở phòng họp trực tuyến" : "Phòng họp trực tuyến đã tắt"
+        enabled ? "Chủ tọa đã mở phòng họp trực tuyến" : "Phòng họp trực tuyến đã tắt"
       );
+      loadData().catch(() => {});
+    });
+    // Chủ tọa đổi luật phát biểu hoặc mời người khác: mọi người phải thấy ngay.
+    socket.on("speaker_mode_updated", ({ mode }) => {
+      setConfig((current) => (current ? { ...current, speakerMode: mode } : current));
+      setNotice(
+        mode === "MODERATED"
+          ? "Chủ tọa đang điều hành lượt phát biểu"
+          : "Đã chuyển sang tự do phát biểu"
+      );
+      loadData().catch(() => {});
+    });
+    socket.on("speaker_updated", ({ userId }) => {
+      setConfig((current) => (current ? { ...current, currentSpeakerId: userId } : current));
+      loadData().catch(() => {});
+    });
+    socket.on("speak_permission_updated", ({ userId: targetId, canSpeak }) => {
+      setMeeting((current) =>
+        current
+          ? {
+              ...current,
+              participants: current.participants.map((item) =>
+                item.user_id === targetId ? { ...item, can_speak: canSpeak } : item
+              )
+            }
+          : current
+      );
+      // Quyền của chính mình đổi thì phải lấy lại vé LiveKit cho khớp.
+      if (targetId === user.id) loadData().catch(() => {});
+    });
+    socket.on("chairman_changed", ({ fullName }) => {
+      setNotice(`${fullName} đang là chủ tọa cuộc họp`);
       loadData().catch(() => {});
     });
     socket.on("attendance_updated", ({ userId, status, method }) => {
@@ -373,7 +406,7 @@ export function LiveMeetingPage() {
       socket.emit("leave_meeting_room", { meetingId: id });
       socket.disconnect();
     };
-  }, [id, token, loadData]);
+  }, [id, token, loadData, user.id]);
 
   const participants = asArray(meeting?.participants);
   const votes = asArray(meeting?.votes);
@@ -387,11 +420,9 @@ export function LiveMeetingPage() {
     () => chat.filter((item) => item.document_id),
     [chat]
   );
-  const canUploadDocument =
-    isOrganizer || config?.permissions?.canUploadDocument === true;
-  const canEditSharedNotes = Boolean(
-    config?.permissions?.isOrganizer || config?.permissions?.roleInMeeting === "SECRETARY"
-  );
+  const moderated = config?.speakerMode === "MODERATED";
+  const canUploadDocument = perm.canUploadDocument === true;
+  const canEditSharedNotes = perm.canEditSharedNotes === true;
   const summary = useMemo(() => attendanceSummary(participants), [participants]);
   const inRoom = onlineCount(participants);
   const me = participants.find((item) => item.user_id === user.id);
@@ -449,6 +480,31 @@ export function LiveMeetingPage() {
     await run(
       () => api.post(`/meetings/${id}/attendance/checkin`, {}),
       "Đã điểm danh"
+    );
+  }
+
+  /** Mời một người phát biểu; truyền null để thu lượt đang nói. */
+  async function inviteSpeaker(userId) {
+    await run(
+      () => api.put(`/meetings/${id}/speaker`, { userId }),
+      userId ? "Đã mời phát biểu" : "Đã thu lượt phát biểu"
+    );
+  }
+
+  /** Bật / tắt quyền nói của một người mà không đụng tới lượt đang diễn ra. */
+  async function toggleSpeakPermission(userId, canSpeak) {
+    await run(
+      () => api.put(`/meetings/${id}/participants/${userId}/speak`, { canSpeak }),
+      canSpeak ? "Đã cấp quyền phát biểu" : "Đã thu quyền phát biểu"
+    );
+  }
+
+  async function changeSpeakerMode(mode) {
+    await run(
+      () => api.put(`/meetings/${id}/speaker-mode`, { mode }),
+      mode === "MODERATED"
+        ? "Chuyển sang chế độ chủ tọa mời phát biểu"
+        : "Chuyển sang chế độ tự do phát biểu"
     );
   }
 
@@ -540,7 +596,7 @@ export function LiveMeetingPage() {
       setNotice(
         res.data.data.status === "APPROVED"
           ? "Đã đăng tài liệu cho cả phòng họp"
-          : "Đã gửi tài liệu, chờ chủ trì duyệt"
+          : "Đã gửi tài liệu, chờ chủ tọa duyệt"
       );
       await loadData();
       return res.data.data;
@@ -763,6 +819,11 @@ export function LiveMeetingPage() {
           </span>
           <StatusPill value={meeting.meeting_type} />
           <StatusPill value={meeting.status} />
+          {moderated && (
+            <span className="pill warning">
+              <Hand size={11} /> Chủ tọa mời mới được nói
+            </span>
+          )}
           <Link className="danger-button" to={liveBackPath}>
             <PhoneOff size={16} />
             Rời phòng
@@ -798,7 +859,7 @@ export function LiveMeetingPage() {
                 trình, tài liệu, điểm danh, biểu quyết, ghi chú — vẫn hoạt động bình
                 thường ở bên dưới.
               </p>
-              {isOrganizer && !meetingClosed && (
+              {perm.canEditMeeting && !meetingClosed && (
                 <button
                   className="primary-button"
                   onClick={() => toggleOnlineRoom(true)}
@@ -839,9 +900,13 @@ export function LiveMeetingPage() {
               onFilter={setPeopleFilter}
               organizerName={meeting.organizer_name}
               currentUserId={user.id}
-              canMark={isOrganizer && !meetingClosed}
+              canMark={perm.canMarkAttendance && !meetingClosed}
               onMark={markAttendance}
               inRoom={inRoom}
+              canControlSpeakers={perm.canControlSpeakers && !meetingClosed}
+              currentSpeakerId={config.currentSpeakerId}
+              onInviteSpeaker={inviteSpeaker}
+              onToggleSpeak={toggleSpeakPermission}
             />
           ) : (
             <div className="live-chat">
@@ -887,7 +952,7 @@ export function LiveMeetingPage() {
               title={
                 config.permissions.canSpeak
                   ? "Bật / tắt micro"
-                  : "Chủ trì chưa cấp quyền phát biểu"
+                  : "Chủ tọa chưa cấp quyền phát biểu"
               }
             >
               {media.mic ? <Mic size={16} /> : <MicOff size={16} />}
@@ -908,7 +973,7 @@ export function LiveMeetingPage() {
               title={
                 config.permissions.canShareScreen
                   ? "Chia sẻ màn hình"
-                  : "Chủ trì chưa cấp quyền chia sẻ màn hình"
+                  : "Chủ tọa chưa cấp quyền chia sẻ màn hình"
               }
             >
               {media.screen ? <VideoOff size={16} /> : <MonitorUp size={16} />}
@@ -925,7 +990,7 @@ export function LiveMeetingPage() {
           {me?.is_hand_raised ? "Hạ tay" : "Giơ tay"}
         </button>
 
-        {isParticipant && (
+        {!perm.isChairman && (
           <button
             className="primary-button"
             onClick={checkIn}
@@ -942,7 +1007,7 @@ export function LiveMeetingPage() {
           </button>
         )}
 
-        {isOrganizer && !meetingClosed && (
+        {perm.canEditMeeting && !meetingClosed && (
           <>
             <button
               className={`secondary-button ${onlineRoomOn ? "is-on" : ""}`}
@@ -956,6 +1021,19 @@ export function LiveMeetingPage() {
             >
               <Video size={16} />
               {onlineRoomOn ? "Phòng trực tuyến: bật" : "Bật phòng trực tuyến"}
+            </button>
+            <button
+              className={`secondary-button ${moderated ? "is-on" : ""}`}
+              onClick={() => changeSpeakerMode(moderated ? "FREE" : "MODERATED")}
+              disabled={busy}
+              title={
+                moderated
+                  ? "Đang điều hành lượt nói — bấm để cho tự do phát biểu"
+                  : "Chuyển sang chế độ chỉ ai được mời mới phát biểu"
+              }
+            >
+              <Hand size={16} />
+              {moderated ? "Điều hành lượt nói" : "Tự do phát biểu"}
             </button>
             {meeting.status === "ONGOING" && (
               <button className="danger-button" onClick={finishMeeting} disabled={busy}>
@@ -988,7 +1066,7 @@ export function LiveMeetingPage() {
           <LiveAgenda
             agenda={asArray(meeting.agenda)}
             currentAgenda={currentAgenda}
-            isOrganizer={isOrganizer}
+            canControl={perm.canControlAgenda}
             onCurrent={setAgendaCurrent}
             onDone={setAgendaDone}
           />
@@ -999,7 +1077,7 @@ export function LiveMeetingPage() {
             currentDocument={currentDocument}
             messages={documentMessages}
             notes={documentNotes}
-            canManage={isOrganizer}
+            canManage={perm.canReviewDocument}
             canUpload={canUploadDocument}
             canEditNotes={canEditSharedNotes}
             meetingClosed={meetingClosed}
@@ -1025,8 +1103,7 @@ export function LiveMeetingPage() {
           <LiveAttendance
             participants={participants}
             summary={summary}
-            isOrganizer={isOrganizer}
-            canMark={isOrganizer && !meetingClosed}
+            canMark={perm.canMarkAttendance && !meetingClosed}
             onMark={markAttendance}
           />
         )}
@@ -1034,8 +1111,7 @@ export function LiveMeetingPage() {
           <LiveVotes
             votes={votes}
             voteResults={voteResults}
-            isOrganizer={isOrganizer}
-            isParticipant={isParticipant}
+            canManage={perm.canManageVotes}
             participantCount={participants.length}
             busy={busy}
             onOpen={openVote}
@@ -1052,10 +1128,7 @@ export function LiveMeetingPage() {
             onPersonalChange={setPersonalNotes}
             onSavePublic={savePublicNotes}
             onSavePersonal={savePersonalNotes}
-            canEditPublic={
-              config.permissions.isOrganizer ||
-              config.permissions.roleInMeeting === "SECRETARY"
-            }
+            canEditPublic={canEditSharedNotes}
           />
         )}
         {activeTab === "tasks" && <LiveTasks tasks={asArray(meeting.tasks)} />}
@@ -1073,7 +1146,11 @@ function ParticipantPanel({
   currentUserId,
   canMark,
   onMark,
-  inRoom
+  inRoom,
+  canControlSpeakers,
+  currentSpeakerId,
+  onInviteSpeaker,
+  onToggleSpeak
 }) {
   const query = filter.trim().toLowerCase();
   const matched = participants.filter(
@@ -1098,9 +1175,17 @@ function ParticipantPanel({
           />
         </div>
         <p className="muted">
-          {inRoom} người đang trong phòng · Chủ trì: {organizerName || "-"}
+          {inRoom} người đang trong phòng · Chủ tọa: {organizerName || "-"}
         </p>
       </div>
+
+      {canControlSpeakers && (
+        <SpeakerQueue
+          participants={participants}
+          currentSpeakerId={currentSpeakerId}
+          onInvite={onInviteSpeaker}
+        />
+      )}
 
       <div className="people-list">
         <PeopleGroup
@@ -1110,6 +1195,10 @@ function ParticipantPanel({
           currentUserId={currentUserId}
           canMark={canMark}
           onMark={onMark}
+          canControlSpeakers={canControlSpeakers}
+          currentSpeakerId={currentSpeakerId}
+          onInviteSpeaker={onInviteSpeaker}
+          onToggleSpeak={onToggleSpeak}
           emptyText="Chưa có ai vào phòng."
         />
         <PeopleGroup
@@ -1119,6 +1208,10 @@ function ParticipantPanel({
           currentUserId={currentUserId}
           canMark={canMark}
           onMark={onMark}
+          canControlSpeakers={canControlSpeakers}
+          currentSpeakerId={currentSpeakerId}
+          onInviteSpeaker={onInviteSpeaker}
+          onToggleSpeak={onToggleSpeak}
           emptyText="Tất cả đã vào phòng."
         />
       </div>
@@ -1126,7 +1219,73 @@ function ParticipantPanel({
   );
 }
 
-function PeopleGroup({ title, count, people, currentUserId, canMark, onMark, emptyText }) {
+/**
+ * Hàng đợi phát biểu: ai giơ tay trước đứng trước, chủ tọa bấm mời là người đó
+ * được bật mic và hạ tay xuống.
+ */
+function SpeakerQueue({ participants, currentSpeakerId, onInvite }) {
+  const queue = participants
+    .filter((item) => item.is_hand_raised)
+    .sort(
+      (a, b) =>
+        new Date(a.hand_raised_at || 0).getTime() -
+        new Date(b.hand_raised_at || 0).getTime()
+    );
+  const speaker = participants.find((item) => item.user_id === currentSpeakerId);
+
+  return (
+    <div className="speaker-queue">
+      <div className="speaker-now">
+        <span className="eyebrow">Đang phát biểu</span>
+        {speaker ? (
+          <div className="row-actions">
+            <strong>{speaker.full_name}</strong>
+            <button className="ghost-button" onClick={() => onInvite(null)}>
+              Thu lượt
+            </button>
+          </div>
+        ) : (
+          <p className="muted small">Chưa mời ai phát biểu.</p>
+        )}
+      </div>
+
+      <h4>
+        Đang giơ tay <em>{queue.length}</em>
+      </h4>
+      {queue.length === 0 ? (
+        <p className="muted small">Chưa có ai xin phát biểu.</p>
+      ) : (
+        queue.map((item, index) => (
+          <div key={item.user_id} className="queue-row">
+            <span className="queue-index">{index + 1}</span>
+            <div className="people-identity">
+              <strong>{item.full_name}</strong>
+              <small>{item.department_name || "Thành viên"}</small>
+            </div>
+            <button className="secondary-button" onClick={() => onInvite(item.user_id)}>
+              <Mic size={14} />
+              Mời phát biểu
+            </button>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function PeopleGroup({
+  title,
+  count,
+  people,
+  currentUserId,
+  canMark,
+  onMark,
+  canControlSpeakers,
+  currentSpeakerId,
+  onInviteSpeaker,
+  onToggleSpeak,
+  emptyText
+}) {
   return (
     <div className="people-group">
       <h4>
@@ -1158,6 +1317,15 @@ function PeopleGroup({ title, count, people, currentUserId, canMark, onMark, emp
                 </span>
               )}
               <StatusPill value={item.attendance_status || "ABSENT"} />
+              {canControlSpeakers && item.user_id !== currentUserId && (
+                <button
+                  className={`icon-button ${item.can_speak ? "is-on" : ""}`}
+                  title={item.can_speak ? "Thu quyền phát biểu" : "Cấp quyền phát biểu"}
+                  onClick={() => onToggleSpeak(item.user_id, !item.can_speak)}
+                >
+                  {item.can_speak ? <Mic size={15} /> : <MicOff size={15} />}
+                </button>
+              )}
               {canMark && !["PRESENT", "LATE"].includes(item.attendance_status) && (
                 <button
                   className="icon-button"
@@ -1175,7 +1343,7 @@ function PeopleGroup({ title, count, people, currentUserId, canMark, onMark, emp
   );
 }
 
-function LiveAgenda({ agenda, currentAgenda, isOrganizer, onCurrent, onDone }) {
+function LiveAgenda({ agenda, currentAgenda, canControl, onCurrent, onDone }) {
   if (agenda.length === 0) return <EmptyState title="Cuộc họp chưa có chương trình nghị sự" />;
   return (
     <div className="live-panel-grid">
@@ -1198,7 +1366,7 @@ function LiveAgenda({ agenda, currentAgenda, isOrganizer, onCurrent, onDone }) {
               <span className="muted">{item.duration_minutes || 0} phút</span>
             </div>
           </div>
-          {isOrganizer && (
+          {canControl && (
             <div className="row-actions">
               <button
                 className="secondary-button"
@@ -1222,7 +1390,7 @@ function LiveAgenda({ agenda, currentAgenda, isOrganizer, onCurrent, onDone }) {
   );
 }
 
-function LiveAttendance({ participants, summary, isOrganizer, canMark, onMark }) {
+function LiveAttendance({ participants, summary, canMark, onMark }) {
   return (
     <div className="live-attendance">
       <div className="mini-stats">
@@ -1255,7 +1423,7 @@ function LiveAttendance({ participants, summary, isOrganizer, canMark, onMark })
               <th>Trạng thái</th>
               <th>Hình thức</th>
               <th>Thời gian</th>
-              {isOrganizer && <th>Chỉnh tay</th>}
+              {canMark && <th>Chỉnh tay</th>}
             </tr>
           </thead>
           <tbody>
@@ -1270,7 +1438,7 @@ function LiveAttendance({ participants, summary, isOrganizer, canMark, onMark })
                 </td>
                 <td>{attendanceMethodLabel(item.attendance_method)}</td>
                 <td>{item.checked_in_at ? formatDateTime(item.checked_in_at) : "-"}</td>
-                {isOrganizer && (
+                {canMark && (
                   <td className="row-actions">
                     <button
                       className="ghost-button"
@@ -1316,7 +1484,7 @@ function LiveNotes({
   return (
     <div className="live-notes-grid">
       <label>
-        Ghi chú chung {canEditPublic ? "" : "(chỉ chủ trì và thư ký được sửa)"}
+        Ghi chú chung {canEditPublic ? "" : "(chỉ chủ tọa và thư ký được sửa)"}
         <textarea
           value={publicNotes}
           onChange={(event) => onPublicChange(event.target.value)}
@@ -1349,8 +1517,7 @@ function LiveNotes({
 function LiveVotes({
   votes,
   voteResults,
-  isOrganizer,
-  isParticipant,
+  canManage,
   participantCount,
   busy,
   onOpen,
@@ -1362,7 +1529,7 @@ function LiveVotes({
     return (
       <EmptyState
         title="Chưa có nội dung biểu quyết"
-        description="Chủ trì tạo biểu quyết trong trang chi tiết cuộc họp, sau đó mở lấy ý kiến tại đây."
+        description="Chủ tọa tạo biểu quyết trong trang chi tiết cuộc họp, sau đó mở lấy ý kiến tại đây."
       />
     );
   }
@@ -1373,8 +1540,8 @@ function LiveVotes({
           key={vote.id}
           vote={vote}
           result={voteResults[vote.id]}
-          canManage={isOrganizer}
-          canVote={isParticipant}
+          canManage={canManage}
+          canVote
           participantCount={participantCount}
           busy={busy}
           onOpen={onOpen}

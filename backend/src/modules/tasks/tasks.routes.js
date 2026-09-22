@@ -1,7 +1,6 @@
 import express from "express";
 import { pool } from "../../config/db.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
-import { requireRole } from "../../middlewares/role.middleware.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { badRequest, forbidden, notFound } from "../../utils/httpError.js";
 import {
@@ -12,7 +11,9 @@ import {
 } from "../../utils/validators.js";
 import {
   assertMeetingAccess,
-  assertMeetingOrganizer,
+  assertMeetingSecretaryDuties,
+  canSeeFullMeetingRecord,
+  getMeetingRole,
   assertUserIsParticipantOfMeeting
 } from "../meetings/meetingAccess.js";
 import { NOTIFICATION_TYPES, notifyUsers } from "../notifications/notifications.service.js";
@@ -49,8 +50,9 @@ tasksRouter.use(authenticate);
 meetingTasksRouter.get(
   "/",
   asyncHandler(async (req, res) => {
-    await assertMeetingAccess(req.user, req.params.meetingId);
-    const participantOnly = req.user.role === "PARTICIPANT";
+    const meeting = await assertMeetingAccess(req.user, req.params.meetingId);
+    // Thư ký là người giao việc nên phải thấy toàn bộ, không chỉ việc của mình.
+    const limitedView = !(await canSeeFullMeetingRecord(req.user, meeting));
     const { rows } = await pool.query(
       `SELECT t.*, assignee.full_name AS assigned_to_name, assigner.full_name AS assigned_by_name
        FROM meeting_tasks t
@@ -60,7 +62,7 @@ meetingTasksRouter.get(
          AND t.deleted_at IS NULL
          AND ($2::boolean = false OR t.assigned_to = $3)
        ORDER BY t.created_at DESC`,
-      [req.params.meetingId, participantOnly, req.user.id]
+      [req.params.meetingId, limitedView, req.user.id]
     );
     res.json({ data: rows });
   })
@@ -68,9 +70,8 @@ meetingTasksRouter.get(
 
 meetingTasksRouter.post(
   "/",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    const meeting = await assertMeetingOrganizer(req.user, req.params.meetingId);
+    const meeting = await assertMeetingSecretaryDuties(req.user, req.params.meetingId);
     requireFields(req.body, ["assignedTo", "title"]);
     assertEnum(req.body.priority || "MEDIUM", TASK_PRIORITIES, "task priority");
     await assertUserIsParticipantOfMeeting(req.params.meetingId, req.body.assignedTo);
@@ -136,10 +137,11 @@ tasksRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
     const task = await getTask(req.params.id);
+    const role = await getMeetingRole(req.user, { id: task.meeting_id, organizer_id: task.organizer_id });
     if (
       req.user.role !== "ADMIN" &&
-      task.organizer_id !== req.user.id &&
-      task.assigned_to !== req.user.id
+      task.assigned_to !== req.user.id &&
+      !["CHAIRMAN", "SECRETARY"].includes(role)
     ) {
       throw forbidden("You do not have access to this task");
     }
@@ -149,12 +151,9 @@ tasksRouter.get(
 
 tasksRouter.put(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const task = await getTask(req.params.id);
-    if (task.organizer_id !== req.user.id) {
-      throw forbidden("Only the meeting organizer can update this task");
-    }
+    await assertMeetingSecretaryDuties(req.user, task.meeting_id);
     assertEnum(req.body.priority, TASK_PRIORITIES, "task priority");
     assertEnum(req.body.status, TASK_STATUSES, "task status");
 
@@ -207,9 +206,10 @@ tasksRouter.put(
     assertEnum(req.body.status, TASK_STATUSES, "task status");
     const task = await getTask(req.params.id);
 
+    const role = await getMeetingRole(req.user, { id: task.meeting_id, organizer_id: task.organizer_id });
     if (
       task.assigned_to !== req.user.id &&
-      task.organizer_id !== req.user.id &&
+      !["CHAIRMAN", "SECRETARY"].includes(role) &&
       req.user.role !== "ADMIN"
     ) {
       throw forbidden("You cannot update this task status");
@@ -242,12 +242,9 @@ tasksRouter.put(
 
 tasksRouter.delete(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const task = await getTask(req.params.id);
-    if (task.organizer_id !== req.user.id) {
-      throw forbidden("Only the meeting organizer can delete this task");
-    }
+    await assertMeetingSecretaryDuties(req.user, task.meeting_id);
     await pool.query(
       "UPDATE meeting_tasks SET deleted_at = now(), updated_at = now() WHERE id = $1",
       [req.params.id]
