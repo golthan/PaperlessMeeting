@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { pool } from "../config/db.js";
+import { encryptLegacySigningKeys } from "../modules/minutes/minutes.signing.js";
 
 /**
  * Chạy schema.sql mà không xoá dữ liệu.
@@ -14,6 +15,9 @@ async function run() {
   const schema = fs.readFileSync(path.resolve(__dirname, "schema.sql"), "utf8");
   await pool.query(schema);
   console.log("Schema updated. Dữ liệu hiện có được giữ nguyên.");
+
+  const encrypted = await encryptLegacySigningKeys();
+  if (encrypted) console.log(`Đã mã hoá ${encrypted} khoá ký số còn lưu dạng rõ.`);
 }
 
 run()
