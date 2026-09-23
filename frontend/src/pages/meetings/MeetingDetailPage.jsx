@@ -27,6 +27,7 @@ import { DocumentWorkspace } from "../../components/DocumentWorkspace.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
 import { PageHeader } from "../../components/PageHeader.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
+import { TranscriptPanel } from "../../components/TranscriptPanel.jsx";
 import { useToast } from "../../components/ToastProvider.jsx";
 import { MinutesPanel } from "../../components/MinutesPanel.jsx";
 import { VoteCard } from "../../components/VoteCard.jsx";
@@ -56,6 +57,7 @@ const BASE_TABS = [
   ["overview", "Tổng quan"],
   ["documents", "Tài liệu"],
   ["discussion", "Ý kiến"],
+  ["transcript", "Lời nói"],
   ["agenda", "Chương trình"],
   ["attendance", "Điểm danh"],
   ["votes", "Biểu quyết"],
@@ -143,6 +145,8 @@ export function MeetingDetailPage() {
   // Ý kiến nêu trong phòng họp và phần tổng hợp của thư ký / AI.
   const [roomMessages, setRoomMessages] = useState([]);
   const [publicNotes, setPublicNotes] = useState(null);
+  // Bản ghi lời nói, đọc lại được cả sau khi phòng họp đã đóng.
+  const [transcript, setTranscript] = useState([]);
   // Hộp tài liệu dùng chung với phòng họp, nhưng ở đây chạy hoàn toàn bằng REST
   // nên vẫn mở được sau khi cuộc họp kết thúc — phòng họp realtime thì đã đóng.
   const [documentMessages, setDocumentMessages] = useState([]);
@@ -236,6 +240,21 @@ export function MeetingDetailPage() {
     setPublicNotes(notes.status === "fulfilled" ? notes.value.data.data : null);
   }, [id]);
 
+  /**
+   * Bản ghi lời nói cùng bản tổng hợp của AI.
+   *
+   * Đọc bằng REST nên mở lại được sau khi cuộc họp kết thúc — lúc đó phòng họp
+   * realtime đã đóng nhưng hồ sơ cuộc họp vẫn phải còn nguyên.
+   */
+  const loadTranscript = useCallback(async () => {
+    const [segments, notes] = await Promise.allSettled([
+      api.get(`/meetings/${id}/transcript`, { params: { limit: 100 } }),
+      api.get(`/meetings/${id}/public-notes`)
+    ]);
+    setTranscript(segments.status === "fulfilled" ? segments.value.data.data || [] : []);
+    if (notes.status === "fulfilled") setPublicNotes(notes.value.data.data);
+  }, [id]);
+
   useEffect(() => {
     load().catch((err) => setError(err.response?.data?.message || "Không tải được cuộc họp"));
   }, [id]);
@@ -282,7 +301,8 @@ export function MeetingDetailPage() {
   useEffect(() => {
     if (activeTab === "documents") loadDocumentMessages();
     if (activeTab === "discussion") loadDiscussion();
-  }, [activeTab, loadDocumentMessages, loadDiscussion]);
+    if (activeTab === "transcript") loadTranscript();
+  }, [activeTab, loadDocumentMessages, loadDiscussion, loadTranscript]);
 
   // Tính năng AI chỉ hiện khi backend đã cấu hình khoá API.
   useEffect(() => {
@@ -1213,6 +1233,27 @@ export function MeetingDetailPage() {
               ))}
             </ul>
           )}
+        </section>
+      )}
+
+      {activeTab === "transcript" && (
+        <section className="panel">
+          <p className="muted small">
+            Lời phát biểu được nhận dạng ngay trên máy người nói rồi ghi lại kèm tên
+            và giờ. Đọc lại được cả sau khi cuộc họp kết thúc.
+          </p>
+          <TranscriptPanel
+            meetingId={id}
+            segments={transcript}
+            canRecord={false}
+            canEdit={perm.canEditSharedNotes && meetingEditable}
+            canSummarize={perm.canEditSharedNotes}
+            aiEnabled={aiEnabled}
+            aiSummary={publicNotes}
+            onReload={loadTranscript}
+            onNotice={setMessage}
+            onError={setError}
+          />
         </section>
       )}
 

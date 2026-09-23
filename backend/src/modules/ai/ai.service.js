@@ -193,7 +193,11 @@ Yêu cầu:
 - Mục nào không có dữ liệu thì ghi "Không có".
 - CHỈ dùng thông tin có trong trao đổi. Tuyệt đối không suy diễn, không thêm kết luận
   mà không ai nói ra, không bịa số liệu.
-- Nêu đúng tên người phát biểu như trong bản ghi.`;
+- Nêu đúng tên người phát biểu như trong bản ghi.
+- Dòng có nhãn [nói] là chữ do máy nhận dạng giọng nói, có thể sai tên riêng, số
+  liệu hoặc thiếu dấu. Khi một nội dung vừa xuất hiện ở dòng [nói] vừa ở dòng
+  [chat] thì tin theo dòng [chat]. Chỗ nào nghe không rõ nghĩa thì bỏ qua, tuyệt
+  đối không đoán thành số liệu hay kết luận.`;
 
 const ASK_SYSTEM = `Bạn là trợ lý tra cứu tài liệu trong phòng họp.
 Trả lời câu hỏi của đại biểu chỉ dựa trên nội dung tài liệu được cung cấp.
@@ -236,17 +240,47 @@ export async function summarizeDocument(document) {
  * Kết quả luôn là BẢN NHÁP — thư ký đọc lại rồi mới đưa vào biên bản, vì biên bản
  * có ký số và giá trị pháp lý.
  */
-export async function summarizeDiscussion({ meeting, agenda = [], messages }) {
-  const transcript = messages
-    .map((item) => {
-      const at = item.created_at
-        ? new Date(item.created_at).toLocaleTimeString("vi-VN", {
-            hour: "2-digit",
-            minute: "2-digit"
-          })
-        : "";
-      return `[${at}] ${item.sender_name || item.sender_email}: ${item.content}`;
-    })
+function clockLabel(value) {
+  if (!value) return "";
+  return new Date(value).toLocaleTimeString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+/**
+ * Tổng hợp diễn biến thảo luận từ HAI nguồn: lời nói và chat.
+ *
+ * Trong một cuộc họp, ý kiến vừa được nói ra vừa được gõ vào chat. Trộn cả hai
+ * theo thứ tự thời gian rồi đưa cho mô hình một dòng thời gian duy nhất, thay vì
+ * tóm tắt riêng hai bản rồi ghép — làm vậy thì cùng một ý bị kể hai lần và
+ * không thấy được ai đáp lại ai.
+ *
+ * Mỗi dòng có nhãn [nói] hoặc [chat] để mô hình biết dòng nào là chữ máy nghe
+ * (có thể sai) và dòng nào là chữ người tự gõ.
+ */
+export async function summarizeDiscussion({
+  meeting,
+  agenda = [],
+  messages = [],
+  speech = []
+}) {
+  const timeline = [
+    ...messages.map((item) => ({
+      at: item.created_at,
+      kind: "chat",
+      who: item.sender_name || item.sender_email,
+      text: item.content
+    })),
+    ...speech.map((item) => ({
+      at: item.spoken_at,
+      kind: "nói",
+      who: item.speaker_name,
+      text: item.content
+    }))
+  ]
+    .sort((a, b) => new Date(a.at) - new Date(b.at))
+    .map((item) => `[${clockLabel(item.at)}] [${item.kind}] ${item.who}: ${item.text}`)
     .join("\n");
 
   // Chương trình nghị sự giúp mô hình gom ý kiến đúng theo từng nội dung đã định.
@@ -273,8 +307,10 @@ export async function summarizeDiscussion({ meeting, agenda = [], messages }) {
               (meeting.description ? `Nội dung chính: ${meeting.description}\n` : "") +
               "\n" +
               agendaBlock +
-              `Bản ghi trao đổi trong phòng họp (${messages.length} tin nhắn):\n` +
-              transcript
+              "Diễn biến trong phòng họp, xếp theo thời gian " +
+              `(${speech.length} lượt phát biểu được ghi âm chuyển chữ, ` +
+              `${messages.length} tin nhắn gõ tay):\n` +
+              timeline
           }
         ]
       }

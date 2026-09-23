@@ -8,6 +8,7 @@ Hệ thống phòng họp không giấy tờ theo spec Live, không tích hợp 
 - Quản lý phòng ban, phòng họp, người dùng, cuộc họp, người tham dự, tài liệu, agenda, điểm danh, biểu quyết, biên bản, task.
 - Live Meeting Room bằng Socket.IO: trạng thái online, chat realtime, raise hand, cập nhật agenda/tài liệu/vote/điểm danh/ghi chú chung.
 - Trung tâm thông báo cho cả 3 vai trò: mời họp, đổi lịch, huỷ họp, bắt đầu/kết thúc, nhắc lịch trước 15 phút, duyệt tài liệu, mở biểu quyết, ban hành biên bản, giao và cập nhật nhiệm vụ. Thông báo hiện realtime ở góc phải trên (web và mobile) kèm chuông đếm số chưa đọc.
+- **Ghi lời nói thành chữ**: người phát biểu bật micro, trình duyệt nhận dạng tiếng Việt ngay trên máy họ rồi gửi chữ về, bản ghi có tên người nói và giờ phút. AI đọc cả lời nói lẫn chat để dựng mục diễn biến của biên bản.
 - Tác vụ nền định kỳ: nhắc lịch họp sắp diễn ra, tự chuyển nhiệm vụ quá hạn sang OVERDUE, tự đóng cuộc họp quá giờ kết thúc.
 - Khi tạo cuộc họp, organizer chỉ chọn giữa hai hình thức rõ ràng: **họp tập trung** (`OFFLINE`) và **họp trực tuyến** (`ONLINE`). Cả hai đều chạy đầy đủ chuẩn không giấy tờ: tài liệu số, chương trình nghị sự, điểm danh, biểu quyết, biên bản, nhiệm vụ.
 - Cuộc họp tập trung có thể **bật phòng họp trực tuyến bất cứ lúc nào** (kể cả đang họp) để người ở xa vào bằng video — lúc đó cuộc họp chuyển sang `HYBRID` mà vẫn giữ nguyên phòng vật lý và toàn bộ dữ liệu. Tắt đi thì quay lại `OFFLINE`.
@@ -372,6 +373,77 @@ Chi tiết kỹ thuật đáng nêu trong báo cáo:
 - Quyền: tóm tắt giới hạn ở chủ tọa và thư ký (vừa là khâu kiểm duyệt, vừa kiểm soát chi phí gọi API); hỏi đáp mở cho mọi người dự. Mọi lượt gọi AI đều ghi vào nhật ký truy vết.
 
 Mã nguồn: [`backend/src/modules/ai/ai.service.js`](backend/src/modules/ai/ai.service.js).
+
+## Ghi lời nói thành chữ (speech to text)
+
+Cuộc họp nào cũng có phần ý kiến chỉ được **nói ra**, không ai gõ vào chat. Tab **Lời nói**
+ghi lại phần đó thành chữ, kèm tên người nói và giờ phút, rồi đưa cho AI tóm tắt cùng với chat.
+
+### Cách làm: nhận dạng ngay trên máy người nói
+
+Người phát biểu bấm **"Ghi lời nói của tôi"**, trình duyệt nhận dạng giọng nói bằng
+**Web Speech API** (`vi-VN`) rồi gửi từng câu đã chốt về máy chủ qua
+`POST /api/meetings/:id/transcript`. Máy chủ phát lại cho cả phòng bằng socket
+(`transcript_segment`) nên mọi người theo được lời nói ngay lúc họp.
+
+Chọn cách này vì ba lý do:
+
+1. **Biết ngay ai nói câu nào.** Mỗi người nhận dạng giọng của chính mình nên không phải
+   tách giọng từ luồng audio trộn của cả phòng — việc đó khó và hay sai.
+2. **Tiếng nói không rời khỏi máy người dùng**, chỉ có chữ đi qua mạng.
+3. **Không phát sinh khoá API hay chi phí theo phút.** Claude chỉ nhận chữ, không có API
+   speech-to-text, nên nếu làm phía máy chủ thì phải thêm Whisper/Deepgram.
+
+Đánh đổi phải biết: Web Speech API **chỉ có trên Chrome và Edge** (Firefox, Safari chưa có),
+và trình duyệt đòi trang chạy trên **HTTPS hoặc localhost**. Trình duyệt không hỗ trợ thì
+nút ghi tự ẩn và hiện một dòng nhắc, các chức năng khác vẫn dùng bình thường.
+
+Cột `source` của bảng `meeting_transcripts` nhận `BROWSER | MOBILE | SERVER | MANUAL`, và
+cổng nhận dữ liệu không phụ thuộc nguồn — muốn cắm thêm Whisper phía máy chủ sau này thì chỉ
+thêm một nguồn ghi vào, không phải làm lại phần lưu trữ và hiển thị.
+
+### Quyền và độ tin cậy của bản ghi
+
+- Ghi được hay không **gắn với quyền phát biểu**: ở chế độ chủ tọa mời mới được nói, người
+  chưa được mời thì lời nói cũng không vào bản ghi — nếu không thì tắt mic mà vẫn ghi được
+  là vô nghĩa. Chủ tọa và thư ký luôn ghi được vì họ chịu trách nhiệm về bản ghi.
+- **Sửa được đoạn máy nghe sai.** Nhận dạng tiếng Việt sai tên riêng và số liệu là chuyện
+  thường, mà đoạn này sẽ đi vào biên bản có ký số. Chủ tọa và thư ký sửa hoặc xoá được; bản
+  ghi đánh dấu `is_edited` kèm người sửa nên vẫn phân biệt được chữ máy nghe và chữ người sửa.
+  Hai thao tác này vào nhật ký truy vết (`TRANSCRIPT_EDIT`, `TRANSCRIPT_DELETE`).
+- Mỗi đoạn được gắn vào **nội dung chương trình đang trình bày**, để biên bản gom ý kiến đúng
+  theo từng nội dung.
+- Họp xong thì **không ghi thêm** được nhưng **vẫn đọc lại** được, kể cả tải ra file `.txt`.
+
+### AI đọc cả lời nói lẫn chat
+
+`summarizeDiscussion()` trộn hai nguồn thành **một dòng thời gian duy nhất**, mỗi dòng có nhãn
+`[nói]` hoặc `[chat]`, thay vì tóm tắt riêng rồi ghép — làm vậy thì cùng một ý bị kể hai lần và
+không thấy được ai đáp lại ai. Nhãn cũng cho mô hình biết dòng nào là chữ máy nghe: prompt dặn
+rõ khi một nội dung xuất hiện ở cả hai nơi thì tin theo `[chat]`, và chỗ nghe không rõ nghĩa
+thì bỏ qua chứ không đoán thành số liệu.
+
+Kết quả rất khá với số đọc thành chữ: "bốn mươi máy" ra `40 máy`, "sáu trăm triệu" ra
+`600.000.000 đồng`, "một tỷ hai" ra `1,2 tỷ đồng`.
+
+Bản tóm tắt vào mục VI của biên bản, có ghi rõ nguồn — `ai_summary_source` nhận
+`SPEECH | CHAT | BOTH` và biên bản in "(Bản nháp do AI tổng hợp từ N lượt phát biểu được ghi
+âm chuyển chữ và M ý kiến trao đổi — thư ký cần rà soát trước khi ký.)"
+
+### Trên điện thoại
+
+App mobile **đọc** được bản ghi, cả lúc đang họp (theo socket) và sau khi họp xong. Việc bật
+micro để ghi thì làm trên web: nhận dạng giọng nói trên React Native cần thư viện native
+(`@react-native-voice/voice`) nên phải dev build, Expo Go không có sẵn.
+
+### API
+
+| Method | Đường dẫn | Ai dùng được |
+|---|---|---|
+| `GET` | `/api/meetings/:id/transcript` | ai có quyền xem cuộc họp |
+| `POST` | `/api/meetings/:id/transcript` | người đang được phát biểu, chủ tọa, thư ký |
+| `PUT` | `/api/transcript/:id` | chủ tọa, thư ký |
+| `DELETE` | `/api/transcript/:id` | chủ tọa, thư ký |
 
 ## AI tổng hợp thảo luận thành biên bản
 

@@ -27,6 +27,9 @@ export const MINUTES_STATUSES = ["DRAFT", "PUBLISHED"];
 export const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE", "OVERDUE"];
 export const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"];
 
+/** Nguồn của một đoạn ghi lời nói. SERVER để dành cho Whisper/Deepgram sau này. */
+export const TRANSCRIPT_SOURCES = ["BROWSER", "MOBILE", "SERVER", "MANUAL"];
+
 export function requireFields(body, fields) {
   const missing = fields.filter((field) => {
     const value = body[field];

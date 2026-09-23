@@ -25,6 +25,7 @@ import { DocumentRoom } from "./documentRoom";
 import { asArray, hasOnlineRoom } from "./format";
 import {
   AgendaPanel,
+  TranscriptPanel,
   AttendancePanel,
   ChatPanel,
   DocumentsPanel,
@@ -45,6 +46,7 @@ const TABS = [
   { key: "room", label: "Phòng họp", icon: "videocam-outline" },
   { key: "people", label: "Người dự", icon: "people-outline" },
   { key: "chat", label: "Trò chuyện", icon: "chatbubbles-outline" },
+  { key: "transcript", label: "Lời nói", icon: "mic-outline" },
   { key: "agenda", label: "Chương trình", icon: "list-outline" },
   { key: "documents", label: "Tài liệu", icon: "document-text-outline" },
   { key: "votes", label: "Biểu quyết", icon: "checkbox-outline" },
@@ -73,6 +75,8 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
   const [meeting, setMeeting] = useState(null);
   const [config, setConfig] = useState(null);
   const [chat, setChat] = useState([]);
+  // Ban ghi loi noi cua phong hop; dien thoai chi doc, viec ghi lam tren web.
+  const [transcript, setTranscript] = useState([]);
   const [publicNotes, setPublicNotes] = useState("");
   const [personalNotes, setPersonalNotes] = useState("");
   const [voteResults, setVoteResults] = useState({});
@@ -94,21 +98,29 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
   const VideoRoom = useMemo(() => getVideoRoom(), []);
 
   const load = useCallback(async () => {
-    const [meetingResult, configResult, chatResult, publicResult, personalResult] =
-      await Promise.all([
-        apiRequest(`/meetings/${meetingId}`, { token: auth.token }),
-        apiRequest(`/meetings/${meetingId}/live-config`, { token: auth.token }),
-        // scope=room: bỏ qua tin thảo luận nằm trong từng hộp tài liệu.
-        apiRequest(`/meetings/${meetingId}/chat?limit=120&scope=room`, { token: auth.token }),
-        apiRequest(`/meetings/${meetingId}/public-notes`, { token: auth.token }),
-        apiRequest(`/meetings/${meetingId}/personal-notes`, { token: auth.token })
-      ]);
+    const [
+      meetingResult,
+      configResult,
+      chatResult,
+      publicResult,
+      personalResult,
+      transcriptResult
+    ] = await Promise.all([
+      apiRequest(`/meetings/${meetingId}`, { token: auth.token }),
+      apiRequest(`/meetings/${meetingId}/live-config`, { token: auth.token }),
+      // scope=room: bỏ qua tin thảo luận nằm trong từng hộp tài liệu.
+      apiRequest(`/meetings/${meetingId}/chat?limit=120&scope=room`, { token: auth.token }),
+      apiRequest(`/meetings/${meetingId}/public-notes`, { token: auth.token }),
+      apiRequest(`/meetings/${meetingId}/personal-notes`, { token: auth.token }),
+      apiRequest(`/meetings/${meetingId}/transcript?limit=100`, { token: auth.token })
+    ]);
 
     setMeeting(meetingResult.data);
     setConfig(configResult.data);
     setChat(chatResult.data || []);
     setPublicNotes(publicResult.data?.content || "");
     setPersonalNotes(personalResult.data?.content || "");
+    setTranscript(transcriptResult.data || []);
   }, [meetingId, auth.token]);
 
   useEffect(() => {
@@ -154,6 +166,21 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
   }
 
   useSocketEvents(socket, {
+    // Loi noi duoc nhan dang tren may nguoi phat bieu (web) roi phat lai cho ca
+    // phong, nen dien thoai theo duoc ban ghi ngay luc hop.
+    transcript_segment(segment) {
+      setTranscript((current) =>
+        current.some((item) => item.id === segment.id) ? current : [...current, segment]
+      );
+    },
+    transcript_updated(segment) {
+      setTranscript((current) =>
+        current.map((item) => (item.id === segment.id ? { ...item, ...segment } : item))
+      );
+    },
+    transcript_removed({ id: segmentId }) {
+      setTranscript((current) => current.filter((item) => item.id !== segmentId));
+    },
     new_chat_message(message) {
       // Tin của hộp tài liệu do màn hình tài liệu tự xử lý.
       if (message.document_id) return;
@@ -612,6 +639,10 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
               organizerName={meeting.organizer_name}
               showPresence
             />
+          )}
+
+          {activeTab === "transcript" && (
+            <TranscriptPanel meetingId={meetingId} auth={auth} segments={transcript} />
           )}
 
           {activeTab === "agenda" && <AgendaPanel agenda={meeting.agenda} />}

@@ -259,9 +259,18 @@ export async function generateMinutesContent(meetingId) {
   if (notes?.content?.trim()) {
     push(notes.content.trim());
   } else if (notes?.ai_summary?.trim()) {
+    // Nói rõ bản nháp lấy từ đâu: lời nói máy nghe được có thể sai, người ký
+    // phải biết mà rà, không thể chỉ thấy một dòng "AI tổng hợp" chung chung.
+    const parts = [];
+    if (notes.ai_summary_speech_count) {
+      parts.push(`${notes.ai_summary_speech_count} lượt phát biểu được ghi âm chuyển chữ`);
+    }
+    if (notes.ai_summary_message_count) {
+      parts.push(`${notes.ai_summary_message_count} ý kiến trao đổi trong phòng họp`);
+    }
     push(
-      `(Bản nháp do AI tổng hợp từ ${notes.ai_summary_message_count || 0} ý kiến trao đổi` +
-        " trong phòng họp — thư ký cần rà soát trước khi ký.)"
+      `(Bản nháp do AI tổng hợp từ ${parts.join(" và ") || "diễn biến phòng họp"}` +
+        " — thư ký cần rà soát trước khi ký.)"
     );
     push();
     push(notes.ai_summary.trim());

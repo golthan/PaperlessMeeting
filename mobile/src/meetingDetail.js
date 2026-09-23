@@ -22,6 +22,7 @@ import {
   MinutesPanel,
   ParticipantsPanel,
   TabStrip,
+  TranscriptPanel,
   TasksPanel,
   VotesPanel,
   styles
@@ -31,6 +32,7 @@ import { useSocketEvents } from "./realtime";
 const TABS = [
   { key: "overview", label: "Tổng quan", icon: "information-circle-outline" },
   { key: "documents", label: "Tài liệu", icon: "document-text-outline" },
+  { key: "transcript", label: "Lời nói", icon: "mic-outline" },
   { key: "agenda", label: "Chương trình", icon: "list-outline" },
   { key: "attendance", label: "Điểm danh", icon: "checkmark-done-outline" },
   { key: "votes", label: "Biểu quyết", icon: "checkbox-outline" },
@@ -343,6 +345,10 @@ export function MeetingDetailScreen({
                 : "Tài liệu bạn gửi sẽ hiển thị cho cả phòng sau khi chủ tọa duyệt."
             }
           />
+        )}
+
+        {activeTab === "transcript" && (
+          <TranscriptPanel meetingId={meetingId} auth={auth} />
         )}
 
         {activeTab === "agenda" && <AgendaPanel agenda={meeting.agenda} />}

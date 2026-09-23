@@ -37,6 +37,7 @@ import {
 import { api } from "../../api/client.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { DocumentWorkspace } from "../../components/DocumentWorkspace.jsx";
+import { TranscriptPanel } from "../../components/TranscriptPanel.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
 import { VoteCard } from "../../components/VoteCard.jsx";
@@ -57,6 +58,7 @@ const LIVE_TABS = [
   { key: "documents", label: "Tài liệu", icon: FileText },
   { key: "attendance", label: "Điểm danh", icon: UserCheck },
   { key: "votes", label: "Biểu quyết", icon: Vote },
+  { key: "transcript", label: "Lời nói", icon: Mic },
   { key: "notes", label: "Ghi chú", icon: NotebookPen },
   { key: "tasks", label: "Nhiệm vụ", icon: ListChecks }
 ];
@@ -111,6 +113,9 @@ export function LiveMeetingPage() {
   const [documentNotes, setDocumentNotes] = useState({});
   const [documentQuestions, setDocumentQuestions] = useState({});
   const [aiEnabled, setAiEnabled] = useState(false);
+  // Bản ghi lời nói: nhận dạng chạy trên máy người nói, socket phát lại cho cả phòng.
+  const [transcript, setTranscript] = useState([]);
+  const [publicNotesRow, setPublicNotesRow] = useState(null);
   const [socketState, setSocketState] = useState("connecting");
   const [media, setMedia] = useState({ mic: false, camera: false, screen: false });
   const [busy, setBusy] = useState(false);
@@ -133,19 +138,38 @@ export function LiveMeetingPage() {
   }, [error, toast]);
 
   const loadData = useCallback(async () => {
-    const [meetingRes, configRes, chatRes, publicNotesRes, personalNotesRes] =
-      await Promise.all([
-        api.get(`/meetings/${id}`),
-        api.get(`/meetings/${id}/live-config`),
-        api.get(`/meetings/${id}/chat`, { params: { limit: 200 } }),
-        api.get(`/meetings/${id}/public-notes`),
-        api.get(`/meetings/${id}/personal-notes`)
-      ]);
+    const [
+      meetingRes,
+      configRes,
+      chatRes,
+      publicNotesRes,
+      personalNotesRes,
+      transcriptRes
+    ] = await Promise.all([
+      api.get(`/meetings/${id}`),
+      api.get(`/meetings/${id}/live-config`),
+      api.get(`/meetings/${id}/chat`, { params: { limit: 200 } }),
+      api.get(`/meetings/${id}/public-notes`),
+      api.get(`/meetings/${id}/personal-notes`),
+      api.get(`/meetings/${id}/transcript`, { params: { limit: 100 } })
+    ]);
     setMeeting(meetingRes.data.data);
     setConfig(configRes.data.data);
     setChat(chatRes.data.data || []);
     setPublicNotes(publicNotesRes.data.data?.content || "");
+    setPublicNotesRow(publicNotesRes.data.data || null);
     setPersonalNotes(personalNotesRes.data.data?.content || "");
+    setTranscript(transcriptRes.data.data || []);
+  }, [id]);
+
+  /** Nạp lại riêng bản ghi lời nói sau khi sửa hoặc xoá một đoạn. */
+  const reloadTranscript = useCallback(async () => {
+    const [transcriptRes, notesRes] = await Promise.all([
+      api.get(`/meetings/${id}/transcript`, { params: { limit: 100 } }),
+      api.get(`/meetings/${id}/public-notes`)
+    ]);
+    setTranscript(transcriptRes.data.data || []);
+    setPublicNotesRow(notesRes.data.data || null);
   }, [id]);
 
   useEffect(() => {
@@ -350,6 +374,23 @@ export function LiveMeetingPage() {
       setDocumentNotes((current) => ({ ...current, [note.document_id]: note }));
     });
     socket.on("public_notes_synced", (notes) => setPublicNotes(notes.content || ""));
+
+    // Bản ghi lời nói: mỗi người nhận dạng trên máy mình rồi gửi lên, máy chủ
+    // phát lại cho cả phòng nên ai cũng theo được lời nói đang diễn ra.
+    socket.on("transcript_segment", (segment) => {
+      setTranscript((current) =>
+        current.some((item) => item.id === segment.id) ? current : [...current, segment]
+      );
+    });
+    socket.on("transcript_updated", (segment) => {
+      setTranscript((current) =>
+        current.map((item) => (item.id === segment.id ? { ...item, ...segment } : item))
+      );
+    });
+    socket.on("transcript_removed", ({ id: segmentId }) => {
+      setTranscript((current) => current.filter((item) => item.id !== segmentId));
+    });
+    socket.on("discussion_summary_ready", (notes) => setPublicNotesRow(notes));
     socket.on("current_agenda_updated", (agendaItem) => {
       setMeeting((current) =>
         current
@@ -1118,6 +1159,27 @@ export function LiveMeetingPage() {
             onClose={closeVote}
             onAnswer={answerVote}
             onResults={loadVoteResults}
+          />
+        )}
+        {activeTab === "transcript" && (
+          <TranscriptPanel
+            meetingId={id}
+            segments={transcript}
+            canRecord={perm.canSpeak || canEditSharedNotes}
+            canEdit={canEditSharedNotes}
+            canSummarize={canEditSharedNotes}
+            aiEnabled={aiEnabled}
+            aiSummary={publicNotesRow}
+            onSegment={(segment) =>
+              setTranscript((current) =>
+                current.some((item) => item.id === segment.id)
+                  ? current
+                  : [...current, segment]
+              )
+            }
+            onReload={reloadTranscript}
+            onNotice={setNotice}
+            onError={setError}
           />
         )}
         {activeTab === "notes" && (

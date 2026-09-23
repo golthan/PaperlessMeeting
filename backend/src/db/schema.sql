@@ -534,3 +534,44 @@ ALTER TABLE meeting_notes ADD COLUMN IF NOT EXISTS ai_summary TEXT;
 ALTER TABLE meeting_notes ADD COLUMN IF NOT EXISTS ai_summary_model VARCHAR(80);
 ALTER TABLE meeting_notes ADD COLUMN IF NOT EXISTS ai_summary_updated_at TIMESTAMPTZ;
 ALTER TABLE meeting_notes ADD COLUMN IF NOT EXISTS ai_summary_message_count INTEGER;
+
+-- ============================================================
+-- Bản ghi lời nói (transcript) của cuộc họp.
+--
+-- Người phát biểu bật nhận dạng giọng nói trên máy mình, trình duyệt trả về
+-- chữ rồi gửi đoạn đã chốt về đây. Cách này cho biết ngay AI ai nói câu nào
+-- mà không phải tách giọng từ luồng audio trộn của phòng họp, và tiếng nói
+-- không rời khỏi máy người dùng.
+--
+-- `speaker_name` lưu kèm tại thời điểm ghi để bản ghi vẫn đọc được sau khi
+-- tài khoản bị xoá — cùng nguyên tắc với bảng audit_logs.
+-- `source` để dành cho việc cắm thêm nguồn nhận dạng phía máy chủ về sau.
+-- `is_edited` đánh dấu đoạn đã được sửa tay: nhận dạng tiếng Việt sai là
+-- chuyện thường, nhưng biên bản có ký số nên phải phân biệt được đâu là chữ
+-- máy nghe, đâu là chữ người sửa.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS meeting_transcripts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  agenda_item_id UUID REFERENCES agenda_items(id) ON DELETE SET NULL,
+  speaker_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  speaker_name VARCHAR(150) NOT NULL,
+  content TEXT NOT NULL,
+  language VARCHAR(12) NOT NULL DEFAULT 'vi-VN',
+  confidence REAL,
+  source VARCHAR(20) NOT NULL DEFAULT 'BROWSER',
+  is_edited BOOLEAN NOT NULL DEFAULT FALSE,
+  edited_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  edited_at TIMESTAMPTZ,
+  spoken_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT meeting_transcripts_source_check
+    CHECK (source IN ('BROWSER', 'MOBILE', 'SERVER', 'MANUAL'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_meeting_transcripts_meeting
+  ON meeting_transcripts(meeting_id, spoken_at);
+
+-- Bản tổng hợp của AI nay đọc cả lời nói lẫn chat, nên ghi lại đã lấy từ đâu.
+ALTER TABLE meeting_notes ADD COLUMN IF NOT EXISTS ai_summary_source VARCHAR(20);
+ALTER TABLE meeting_notes ADD COLUMN IF NOT EXISTS ai_summary_speech_count INTEGER;

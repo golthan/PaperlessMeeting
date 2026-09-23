@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -269,6 +269,97 @@ export function ParticipantsPanel({
 }
 
 /** Chương trình nghị sự, có làm nổi mục chủ tọa đang trình bày. */
+/**
+ * Ban ghi loi noi cua cuoc hop, chi doc.
+ *
+ * Nhan dang giong noi tren dien thoai can dev build kem thu vien native
+ * (@react-native-voice/voice) — Expo Go khong co san. Nen o day nguoi dung DOC
+ * lai ban ghi (ke ca sau khi hop xong) va thay ban tom tat cua AI; viec bat
+ * micro de ghi thi lam tren web.
+ */
+export function TranscriptPanel({ meetingId, auth, aiSummary = null, segments = null }) {
+  const [rows, setRows] = useState(segments || []);
+  const [notes, setNotes] = useState(aiSummary);
+  const [loading, setLoading] = useState(!segments);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const [list, publicNotes] = await Promise.all([
+        apiRequest(`/meetings/${meetingId}/transcript?limit=100`, { token: auth.token }),
+        apiRequest(`/meetings/${meetingId}/public-notes`, { token: auth.token })
+      ]);
+      setRows(asArray(list.data));
+      setNotes(publicNotes.data || null);
+      setError("");
+    } catch (err) {
+      setError(err.message || "Khong tai duoc ban ghi loi noi");
+    } finally {
+      setLoading(false);
+    }
+  }, [auth.token, meetingId]);
+
+  useEffect(() => {
+    // Danh sach truyen san (dang o trong phong hop) thi khong goi lai API.
+    if (!segments) load();
+  }, [load, segments]);
+
+  useEffect(() => {
+    if (segments) setRows(segments);
+  }, [segments]);
+
+  const speakers = new Set(rows.map((item) => item.speaker_name)).size;
+
+  return (
+    <Panel>
+      <SectionTitle
+        title="Ban ghi loi noi"
+        subtitle={
+          rows.length
+            ? `${rows.length} luot phat bieu · ${speakers} nguoi noi`
+            : "Chua ghi duoc loi noi nao"
+        }
+      />
+
+      {loading ? (
+        <Text style={styles.muted}>Dang tai ban ghi...</Text>
+      ) : error ? (
+        <ErrorState message={error} onRetry={load} />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title="Chua co ban ghi loi noi"
+          description="Nguoi phat bieu bat ghi loi noi tren web (Chrome hoac Edge); ban ghi se hien o day."
+        />
+      ) : (
+        <View style={styles.stack}>
+          {rows.map((item) => (
+            <View key={item.id} style={styles.transcriptRow}>
+              <View style={styles.inlineWrap}>
+                <Text style={styles.itemTitle}>{item.speaker_name}</Text>
+                <Text style={styles.muted}>{formatDateTime(item.spoken_at)}</Text>
+                {!!item.is_edited && <Text style={styles.noteLine}>da sua</Text>}
+              </View>
+              <Text style={styles.transcriptText}>{item.content}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {!!notes?.ai_summary && (
+        <View style={styles.transcriptSummary}>
+          <Text style={styles.focusLabel}>
+            AI tong hop
+            {notes.ai_summary_speech_count
+              ? ` · ${notes.ai_summary_speech_count} luot phat bieu`
+              : ""}
+          </Text>
+          <Text style={styles.transcriptText}>{notes.ai_summary}</Text>
+        </View>
+      )}
+    </Panel>
+  );
+}
+
 export function AgendaPanel({ agenda }) {
   const items = asArray(agenda);
   const current = items.find((item) => item.status === "CURRENT");
@@ -1220,6 +1311,26 @@ export const styles = StyleSheet.create({
   focusMeta: {
     color: colors.muted,
     fontSize: 13
+  },
+  transcriptRow: {
+    backgroundColor: colors.surfaceSoft,
+    borderRadius: radii.md,
+    gap: 3,
+    padding: spacing.md
+  },
+  transcriptText: {
+    color: colors.text,
+    fontSize: 14,
+    lineHeight: 21
+  },
+  transcriptSummary: {
+    backgroundColor: colors.surfaceSoft,
+    borderColor: colors.primarySoft,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    gap: 6,
+    marginTop: spacing.sm,
+    padding: spacing.md
   },
   agendaRow: {
     borderRadius: radii.md,
