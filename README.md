@@ -261,6 +261,19 @@ PUT /meetings/:id/participants/:userId/permissions  quyền chia sẻ, gửi tà
 Sự kiện Socket.IO kèm theo: `speaker_mode_updated`, `speaker_updated`,
 `speak_permission_updated`, `chairman_changed`.
 
+
+**Quyền phát biểu phải đẩy sang cả máy chủ video.** Vé LiveKit được cấp lúc vào phòng và ghi
+cứng "được phát" hay không; máy chủ video tự chấp hành theo vé đó. Vì vậy sửa mỗi cơ sở dữ
+liệu là chưa đủ — người vừa được chủ tọa mời bấm mic vẫn bị LiveKit từ chối vì vé trong tay
+họ vẫn ghi `canPublish: false`. Ba chỗ đổi lượt phát biểu (`PUT /:id/speaker`,
+`PUT /:id/speaker-mode`, `PUT /:id/participants/:userId/speak`) đều gọi
+`syncLiveRoomPermissions()` để đẩy quyền mới sang LiveKit; máy chủ video cập nhật ngay cho
+người đang kết nối, không phải thoát ra vào lại phòng.
+
+Hàm này **không ném lỗi ra ngoài**: cơ sở dữ liệu mới là nguồn sự thật và lần vào phòng sau vé
+sẽ được cấp đúng, nên LiveKit chết hay người đó chưa vào phòng thì việc chỉ định vẫn thành công.
+Backend gọi LiveKit qua `LIVEKIT_HOST_URL` (mặc định `http://localhost:7880`) — khác
+`LIVEKIT_WS_URL` vốn dành cho trình duyệt.
 ## Điểm danh và biểu quyết
 
 Điểm danh có 3 cách ghi nhận, đều lưu chung một trạng thái `PRESENT / LATE / ABSENT`:

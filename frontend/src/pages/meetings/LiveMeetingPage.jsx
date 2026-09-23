@@ -63,6 +63,37 @@ const LIVE_TABS = [
   { key: "tasks", label: "Nhiệm vụ", icon: ListChecks }
 ];
 
+/**
+ * Dịch lỗi bật mic / camera thành câu người dùng hiểu và sửa được.
+ *
+ * Trước đây mọi lỗi đều hiện một dòng "Không bật được micro", che mất nguyên
+ * nhân thật — mà ba nguyên nhân hay gặp cần ba cách xử lý hoàn toàn khác nhau:
+ * trình duyệt chặn quyền, thiết bị đang bị cửa sổ khác chiếm, và máy chủ video
+ * chưa cho phát.
+ */
+function mediaErrorMessage(error, device) {
+  const name = error?.name || "";
+  const text = String(error?.message || "");
+
+  if (["NotAllowedError", "SecurityError"].includes(name)) {
+    return `Trình duyệt đang chặn quyền dùng ${device}. Bấm vào biểu tượng ổ khóa cạnh thanh địa chỉ để cấp lại quyền.`;
+  }
+  if (name === "NotReadableError" || /in use|could not start/i.test(text)) {
+    return `${device} đang bị một cửa sổ hoặc ứng dụng khác chiếm. Nếu bạn đang mở cuộc họp ở hai cửa sổ trên cùng một máy thì chỉ một cửa sổ dùng được ${device}.`;
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return `Máy không có ${device} nào đang hoạt động.`;
+  }
+  if (name === "OverconstrainedError") {
+    return `${device} không đáp ứng được cấu hình yêu cầu. Thử chọn thiết bị khác.`;
+  }
+  // LiveKit từ chối ở tầng máy chủ khi vé không có quyền phát.
+  if (/permission|not allowed to publish|insufficient/i.test(text)) {
+    return `Bạn chưa được phép phát ${device} trong phòng họp này. Chủ tọa cần mời bạn phát biểu trước.`;
+  }
+  return `Không bật được ${device}${text ? `: ${text}` : ""}`;
+}
+
 function apiOrigin() {
   const base = api.defaults.baseURL || "http://localhost:4000/api";
   return base.replace(/\/api\/?$/, "");
@@ -795,21 +826,21 @@ export function LiveMeetingPage() {
     const local = lkRoom.localParticipant;
     local
       .setMicrophoneEnabled(!local.isMicrophoneEnabled)
-      .catch(() => setError("Không bật được micro"));
+      .catch((err) => setError(mediaErrorMessage(err, "micro")));
   }
 
   function toggleCamera() {
     const local = lkRoom.localParticipant;
     local
       .setCameraEnabled(!local.isCameraEnabled)
-      .catch(() => setError("Không bật được camera"));
+      .catch((err) => setError(mediaErrorMessage(err, "camera")));
   }
 
   function toggleShareScreen() {
     const local = lkRoom.localParticipant;
     local
       .setScreenShareEnabled(!local.isScreenShareEnabled)
-      .catch(() => setError("Không chia sẻ được màn hình"));
+      .catch((err) => setError(mediaErrorMessage(err, "chia sẻ màn hình")));
   }
 
   if (!meeting || !config) {

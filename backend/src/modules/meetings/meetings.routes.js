@@ -9,7 +9,8 @@ import { badRequest, forbidden, notFound } from "../../utils/httpError.js";
 import {
   buildLiveRoomName,
   buildLiveRoomUrl,
-  createLiveRoomToken
+  createLiveRoomToken,
+  syncLiveRoomPermissions
 } from "../../utils/livekit.js";
 import {
   NOTIFICATION_TYPES,
@@ -51,6 +52,30 @@ const MEETING_TYPE_LABELS = {
 };
 
 meetingsRouter.use(authenticate);
+
+/**
+ * Đồng bộ quyền phát biểu của cả phòng sang máy chủ video.
+ *
+ * Vé LiveKit cấp lúc vào phòng đã ghi cứng "được phát" hay không, nên sửa cơ sở
+ * dữ liệu thôi là chưa đủ: người vừa được chủ tọa mời bấm mic vẫn bị LiveKit từ
+ * chối. Gọi hàm này sau mỗi lần đổi lượt phát biểu.
+ */
+async function syncSpeakPermissions(meetingId) {
+  const { rows } = await pool.query(
+    `SELECT user_id, role_in_meeting, can_speak, can_share_screen, can_upload_document
+     FROM meeting_participants WHERE meeting_id = $1`,
+    [meetingId]
+  );
+  await Promise.all(
+    rows.map((row) =>
+      syncLiveRoomPermissions({
+        meetingId,
+        userId: row.user_id,
+        permissions: buildMeetingPermissions(row.role_in_meeting, row)
+      })
+    )
+  );
+}
 
 async function getMeetingDetail(user, meetingId) {
   const meeting = await assertMeetingAccess(user, meetingId);
@@ -867,6 +892,8 @@ meetingsRouter.put(
       );
     }
 
+    await syncSpeakPermissions(req.params.id);
+
     emitMeetingEvent(req.params.id, "speaker_mode_updated", {
       meetingId: req.params.id,
       mode: req.body.mode
@@ -933,6 +960,10 @@ meetingsRouter.put(
         req.params.id
       ]);
     });
+
+    // Đẩy quyền mới sang máy chủ video cho TẤT CẢ người đang trong phòng: người
+    // vừa được mời phải bật được mic ngay, người vừa bị thu lượt phải tắt ngay.
+    await syncSpeakPermissions(req.params.id);
 
     emitMeetingEvent(req.params.id, "speaker_updated", {
       meetingId: req.params.id,

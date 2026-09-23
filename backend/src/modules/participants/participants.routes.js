@@ -2,6 +2,7 @@ import express from "express";
 import { pool, withTransaction } from "../../config/db.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
+import { syncLiveRoomPermissions } from "../../utils/livekit.js";
 import { badRequest, notFound } from "../../utils/httpError.js";
 import { formatMeetingTime } from "../../utils/datetime.js";
 import {
@@ -14,7 +15,8 @@ import {
   assertMeetingChairman,
   assertMeetingScheduling,
   assertMeetingSecretaryDuties,
-  assertParticipantAccess
+  assertParticipantAccess,
+  buildMeetingPermissions
 } from "../meetings/meetingAccess.js";
 import { emitMeetingEvent } from "../../config/socket.js";
 import { NOTIFICATION_TYPES, notifyUsers } from "../notifications/notifications.service.js";
@@ -244,6 +246,14 @@ participantsRouter.put(
         [req.params.meetingId, req.params.userId]
       );
     }
+
+    // Máy chủ video chấp hành theo vé cấp lúc vào phòng, nên phải đẩy quyền mới
+    // sang ngay — không thì người được cấp quyền bấm mic vẫn bị từ chối.
+    await syncLiveRoomPermissions({
+      meetingId: req.params.meetingId,
+      userId: req.params.userId,
+      permissions: buildMeetingPermissions(rows[0].role_in_meeting, rows[0])
+    });
 
     emitMeetingEvent(req.params.meetingId, "speak_permission_updated", {
       meetingId: req.params.meetingId,
