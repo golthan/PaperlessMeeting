@@ -126,6 +126,28 @@ EXPO_PUBLIC_API_URL=http://192.168.1.5:4000/api
 
 Lưu ý monorepo: project dùng npm workspaces nên có 2 bản React (frontend và mobile). File `mobile/metro.config.js` ép Metro luôn dùng `mobile/node_modules/react` — không xóa file này, nếu không app sẽ crash với lỗi "Incompatible React versions".
 
+## Thử cuộc họp nhiều người trên một máy
+
+```bash
+npm run test:windows                  # 3 cửa sổ, micro/camera giả
+npm run test:windows -- -Count 5      # 5 cửa sổ
+```
+
+Mỗi cửa sổ mở bằng một **hồ sơ trình duyệt riêng**, đăng nhập mỗi cửa sổ một tài khoản.
+Có hai cái bẫy khi tự mở thêm tab để thử:
+
+- **Tab cùng hồ sơ dùng chung phiên đăng nhập.** Phiên lưu ở `localStorage`, nên đăng nhập
+  người thứ hai ở tab mới là đè mất người thứ nhất. Cửa sổ ẩn danh cũng chỉ tách được thêm
+  đúng một người, vì mọi cửa sổ ẩn danh dùng chung một phiên.
+- **Camera thật thường chỉ một cửa sổ giữ được.** Windows cho một tiến trình giữ camera tại
+  một thời điểm, nên cửa sổ sau báo "camera đang bị một cửa sổ hoặc ứng dụng khác chiếm".
+  Nhiều micro thật cùng mở trên một máy còn gây hú tiếng.
+
+Script mặc định dùng **micro/camera giả của Chrome** (camera là hình mẫu có đồng hồ chạy,
+micro phát tiếng bíp) nên cửa sổ nào cũng bật được mic và camera cùng lúc — đủ để thử toàn bộ
+luồng phát biểu, chỉ định người nói, chia sẻ màn hình. Cần thử micro thật (ví dụ tính năng ghi
+lời nói) thì thêm `-RealDevices` và đeo tai nghe; khi đó chỉ nên để một cửa sổ bật camera.
+
 ## Luồng demo
 
 1. Đăng nhập Organizer trên web.
