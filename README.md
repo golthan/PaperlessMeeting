@@ -349,7 +349,9 @@ Cơ chế kỹ thuật ([`minutes.signing.js`](backend/src/modules/minutes/minut
 
 Ai được ký: chủ tọa (chức danh *Chủ tọa*) và thư ký (chức danh *Thư ký*) của cuộc họp; thành viên bị từ chối. Ban hành cần ít nhất một chữ ký còn hợp lệ và **người bấm ban hành phải là chủ tọa** — hệ thống không bắt buộc đủ cả hai chữ ký, nhưng ai đã ký thì hiện rõ trong hồ sơ biên bản và trên bản PDF.
 
-**Giới hạn cần nêu trong báo cáo:** khoá riêng sinh tự động và lưu trong database. Hệ thống triển khai thật phải đặt khoá trong USB token hoặc HSM của tổ chức chứng thực số (VNPT-CA, Viettel-CA...); toàn bộ quy trình băm - ký - kiểm tra ở trên giữ nguyên, chỉ thay chỗ giữ khoá.
+**Lưu khoá riêng:** khoá riêng được **mã hoá AES-256-GCM** trước khi lưu vào `user_signing_keys`, bằng khoá lấy từ biến môi trường `SIGNING_KEY_SECRET` (không nằm trong database). Lộ database hay bản sao lưu thì cũng không dùng được khoá để ký giả. `npm run migrate` tự mã hoá các khoá cũ còn lưu dạng rõ. Đặt `SIGNING_KEY_SECRET` một lần rồi giữ nguyên: đổi giá trị thì khoá cũ không giải mã được để ký tiếp, còn các chữ ký đã có vẫn kiểm tra được vì việc kiểm tra chỉ cần khoá công khai.
+
+**Giới hạn cần nêu trong báo cáo:** máy chủ vẫn giữ khoá giải mã nên vẫn ký thay người dùng. Hệ thống triển khai thật sẽ đặt khoá riêng trong USB token hoặc HSM của tổ chức chứng thực số (VNPT-CA, Viettel-CA...); toàn bộ quy trình băm - ký - kiểm tra ở trên giữ nguyên, chỉ thay chỗ giữ khoá.
 
 ### 3. Trang tra cứu công khai + QR
 
