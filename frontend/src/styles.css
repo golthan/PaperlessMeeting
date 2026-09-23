@@ -673,6 +673,41 @@ input[type="radio"] {
   white-space: nowrap;
 }
 
+/* Avatar và tên trên topbar là lối tắt vào trang Hồ sơ cá nhân. */
+a.avatar,
+a.topbar-identity {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.topbar-identity {
+  color: inherit;
+  border-radius: var(--r-full);
+  transition: opacity 0.15s ease;
+}
+
+a.avatar:hover,
+a.topbar-identity:hover {
+  opacity: 0.8;
+}
+
+/* Bảng hồ sơ chờ duyệt: đủ rộng để đọc trọn tên quyền, phòng ban, ghi chú. */
+.pending-table select {
+  min-width: 150px;
+}
+
+.pending-table input {
+  min-width: 180px;
+}
+
+.pending-table small {
+  overflow-wrap: anywhere;
+}
+
+.pending-table td.row-actions {
+  white-space: nowrap;
+}
+
 .mobile-menu {
   display: none;
   align-items: center;
@@ -685,6 +720,8 @@ input[type="radio"] {
 
 .page-stack {
   display: grid;
+  /* minmax(0, 1fr): không cho bảng rộng đẩy tràn cả trang; .table-wrap tự cuộn ngang. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
 
@@ -1074,25 +1111,6 @@ tbody tr:last-child td {
 .agenda-list span {
   color: var(--text-muted);
   font-size: 13px;
-}
-
-.qr-box {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  margin-bottom: 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-  padding: 14px;
-  width: fit-content;
-}
-
-.qr-box img {
-  width: 132px;
-  height: 132px;
-  border-radius: var(--r-sm);
-  background: #fff;
 }
 
 .vote-list {
@@ -4833,4 +4851,409 @@ tr.row-warning .audit-action {
   .verify-form {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Hàng đợi phát biểu: chỉ chủ tọa nhìn thấy, đặt trên danh sách người dự. */
+.speaker-queue {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.speaker-now {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.speaker-queue h4 {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 6px;
+  margin: 0;
+}
+
+.speaker-queue h4 em {
+  background: var(--surface-2);
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  padding: 1px 7px;
+}
+
+.queue-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.queue-index {
+  align-items: center;
+  background: var(--brand-soft, var(--surface-2));
+  border-radius: 999px;
+  display: flex;
+  flex: 0 0 24px;
+  font-size: 12px;
+  font-weight: 700;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+/* Bản nháp AI tổng hợp thảo luận, hiện trong tab Biên bản. */
+.ai-discussion {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+}
+
+.ai-discussion-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.ai-discussion-head strong {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.ai-discussion-body {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px 14px;
+  white-space: pre-wrap;
+}
+
+/* Trang gặp lỗi render: báo rõ thay vì để màn hình trắng. */
+.error-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.error-panel-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+}
+
+.error-panel-icon {
+  align-items: center;
+  background: var(--danger-soft, #fdeeeb);
+  border-radius: var(--r-md);
+  color: var(--danger, #a32f1f);
+  display: flex;
+  flex: 0 0 44px;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.error-panel-head h2 {
+  margin: 0 0 4px;
+}
+
+.error-panel-detail {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--danger, #a32f1f);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  white-space: pre-wrap;
+}
+
+/* ---- Bảng thông tin cuộc họp & danh sách ý kiến ---------------------- */
+
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px 18px;
+  margin-top: 4px;
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fact-label {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fact-value {
+  color: var(--ink-700, var(--ink-600));
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.fact-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.fact-block p {
+  margin: 0;
+  color: var(--ink-600);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.fact-agenda {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.fact-agenda li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.opinion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.opinion-item {
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.opinion-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.opinion-item p {
+  margin: 0;
+  color: var(--ink-600);
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.fact-block .summary-text {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--ink-600);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Bản ghi lời nói (transcript) ----------------------------------- */
+
+.transcript-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.transcript-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.transcript-head h2 {
+  margin: 2px 0 0;
+  font-size: 17px;
+}
+
+.transcript-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.transcript-live {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 9px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--ink-600);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.transcript-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #dc2626;
+  animation: transcript-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes transcript-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transcript-dot { animation: none; }
+}
+
+.transcript-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1, var(--surface-2));
+}
+
+.transcript-search svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.transcript-search input {
+  border: 0;
+  background: transparent;
+  flex: 1;
+  min-width: 0;
+  padding: 9px 0;
+  font: inherit;
+  color: inherit;
+}
+
+.transcript-search input:focus {
+  outline: none;
+}
+
+.transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  max-height: 460px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.transcript-item {
+  padding: 10px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.transcript-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.transcript-item p {
+  margin: 0;
+  color: var(--ink-600);
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.transcript-tag {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.transcript-tag.edited {
+  border-color: #f59e0b66;
+  color: #b45309;
+}
+
+:root:not([data-theme="light"]) .transcript-tag.edited,
+:root[data-theme="dark"] .transcript-tag.edited {
+  color: #fbbf24;
+}
+
+.transcript-item-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.transcript-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transcript-edit textarea {
+  width: 100%;
+  font: inherit;
+  resize: vertical;
 }

@@ -17,6 +17,10 @@ export const env = {
     process.env.LIVEKIT_API_SECRET || "paperless_livekit_dev_secret_0123456789",
   // De trong: client tu suy ra ws://<hostname dang mo trang>:7880
   livekitWsUrl: process.env.LIVEKIT_WS_URL || "",
+  // Dia chi HTTP may chu dung de goi API quan tri cua LiveKit (doi quyen phat
+  // bieu cua nguoi dang o trong phong). Khac livekitWsUrl: cai kia danh cho
+  // trinh duyet, cai nay chi backend goi noi bo.
+  livekitHostUrl: process.env.LIVEKIT_HOST_URL || "http://localhost:7880",
   // Tro ly AI cho tai lieu. Khong dat khoa thi tinh nang AI bao loi ro rang,
   // phan con lai cua he thong van chay binh thuong.
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",

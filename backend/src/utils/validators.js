@@ -1,7 +1,9 @@
 import { badRequest } from "./httpError.js";
 
 export const ROLES = ["ADMIN", "ORGANIZER", "PARTICIPANT"];
-export const USER_STATUSES = ["ACTIVE", "LOCKED"];
+// PENDING: vua dang ky, dang cho quan tri vien duyet.
+// REJECTED: bi tu choi - giu lai ban ghi de truy vet, khong cho dang nhap.
+export const USER_STATUSES = ["ACTIVE", "LOCKED", "PENDING", "REJECTED"];
 export const ROOM_STATUSES = ["AVAILABLE", "UNAVAILABLE"];
 export const MEETING_STATUSES = [
   "DRAFT",
@@ -13,6 +15,8 @@ export const MEETING_STATUSES = [
 export const MEETING_TYPES = ["ONLINE", "OFFLINE", "HYBRID"];
 export const ONLINE_PROVIDERS = ["LIVEKIT", "CUSTOM"];
 export const MEETING_ROLES = ["CHAIRMAN", "SECRETARY", "MEMBER"];
+// FREE: ai cũng tự bật mic. MODERATED: phải được chủ tọa mời mới phát biểu được.
+export const SPEAKER_MODES = ["FREE", "MODERATED"];
 export const INVITATION_STATUSES = ["PENDING", "ACCEPTED", "DECLINED"];
 export const ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "LATE"];
 export const DOCUMENT_STATUSES = ["PENDING", "APPROVED", "REJECTED"];
@@ -22,6 +26,9 @@ export const VOTE_TYPES = ["YES_NO_ABSTAIN", "MULTIPLE_CHOICE"];
 export const MINUTES_STATUSES = ["DRAFT", "PUBLISHED"];
 export const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE", "OVERDUE"];
 export const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"];
+
+/** Nguồn của một đoạn ghi lời nói. SERVER để dành cho Whisper/Deepgram sau này. */
+export const TRANSCRIPT_SOURCES = ["BROWSER", "MOBILE", "SERVER", "MANUAL"];
 
 export function requireFields(body, fields) {
   const missing = fields.filter((field) => {
@@ -48,7 +55,7 @@ export function assertEmail(email) {
 
 export function assertPassword(password) {
   if (!password || password.length < 6) {
-    throw badRequest("Password must have at least 6 characters");
+    throw badRequest("Mật khẩu cần tối thiểu 6 ký tự");
   }
 }
 

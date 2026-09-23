@@ -87,9 +87,8 @@ export function percent(count, total) {
 
 /** Cách một người được ghi nhận điểm danh. */
 export function attendanceMethodLabel(method) {
-  if (method === "QR") return "Quét QR";
   if (method === "JOIN_ROOM") return "Vào phòng họp";
-  if (method === "MANUAL") return "Chủ trì ghi nhận";
+  if (method === "MANUAL") return "Bấm điểm danh";
   return "-";
 }
 
@@ -101,4 +100,18 @@ export function voteOptions(vote) {
   } catch {
     return [];
   }
+}
+
+/**
+ * Nhãn tiếng Việt cho phương án của biểu quyết "Tán thành / Không / Không ý kiến".
+ * Máy chủ vẫn lưu mã YES / NO / ABSTAIN; chỉ đổi cách hiển thị (khớp nhãn trong biên bản).
+ */
+const VOTE_ANSWER_LABELS = {
+  YES: "Tán thành",
+  NO: "Không tán thành",
+  ABSTAIN: "Không ý kiến"
+};
+
+export function voteAnswerLabel(answer) {
+  return VOTE_ANSWER_LABELS[answer] || answer;
 }

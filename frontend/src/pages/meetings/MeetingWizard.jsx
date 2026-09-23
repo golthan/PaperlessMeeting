@@ -30,6 +30,7 @@ const STEPS = [
 ];
 
 const ROLE_LABELS = {
+  CHAIRMAN: "Chủ tọa",
   SECRETARY: "Thư ký",
   MEMBER: "Thành viên"
 };
@@ -56,7 +57,8 @@ export function buildInitialWizardForm() {
     onlineRoom: false,
     startTime: toDateTimeLocal(new Date(Date.now() + 24 * 60 * 60 * 1000)),
     endTime: toDateTimeLocal(new Date(Date.now() + 26 * 60 * 60 * 1000)),
-    roomId: ""
+    roomId: "",
+    speakerMode: "FREE"
   };
 }
 
@@ -131,10 +133,11 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
   function updatePerson(userId, patch) {
     setSelected((current) => {
       const next = { ...current, [userId]: { ...current[userId], ...patch } };
-      // Mỗi cuộc họp chỉ có một thư ký: chọn người mới thì người cũ về thành viên
-      if (patch.roleInMeeting === "SECRETARY") {
+      // Mỗi cuộc họp chỉ có một chủ tọa và một thư ký: chọn người mới thì
+      // người đang giữ vai đó lùi về thành viên.
+      if (["CHAIRMAN", "SECRETARY"].includes(patch.roleInMeeting)) {
         Object.keys(next).forEach((otherId) => {
-          if (otherId !== userId && next[otherId].roleInMeeting === "SECRETARY") {
+          if (otherId !== userId && next[otherId].roleInMeeting === patch.roleInMeeting) {
             next[otherId] = { ...next[otherId], roleInMeeting: "MEMBER" };
           }
         });
@@ -182,6 +185,12 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
     }
     if (key === "people") {
       if (selectedIds.length === 0) return "Cuộc họp cần ít nhất một người tham dự";
+      // Chủ tọa điều hành, thư ký lo thành phần và biên bản — thiếu một trong
+      // hai thì cuộc họp không vận hành được.
+      const hasRole = (value) =>
+        selectedIds.some((userId) => selected[userId].roleInMeeting === value);
+      if (!hasRole("CHAIRMAN")) return "Cuộc họp phải chỉ định một chủ tọa";
+      if (!hasRole("SECRETARY")) return "Cuộc họp phải chỉ định một thư ký";
     }
     if (key === "agenda") {
       const activeRows = agenda.filter(
@@ -237,6 +246,7 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
       startTime: new Date(form.startTime).toISOString(),
       endTime: new Date(form.endTime).toISOString(),
       roomId: form.meetingMode === "ONLINE" ? null : form.roomId,
+      speakerMode: form.speakerMode,
       participants: selectedIds.map((userId) => ({
         userId,
         ...selected[userId]
@@ -262,6 +272,9 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
 
   const secretary = selectedIds.find(
     (userId) => selected[userId].roleInMeeting === "SECRETARY"
+  );
+  const chairman = selectedIds.find(
+    (userId) => selected[userId].roleInMeeting === "CHAIRMAN"
   );
   const presenterOptions = users.filter((item) => selectedIds.includes(item.id));
 
@@ -346,7 +359,7 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
                   <span>
                     <strong>Mở sẵn phòng họp trực tuyến cho người dự từ xa</strong>
                     <small>
-                      Không bắt buộc. Chủ trì có thể bật phòng video bất cứ lúc nào, kể cả
+                      Không bắt buộc. Chủ tọa có thể bật phòng video bất cứ lúc nào, kể cả
                       khi cuộc họp đang diễn ra.
                     </small>
                   </span>
@@ -357,6 +370,22 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
                   Hệ thống tự tạo phòng video LiveKit cho cuộc họp này.
                 </p>
               )}
+              <label className="switch-row">
+                <input
+                  type="checkbox"
+                  checked={form.speakerMode === "MODERATED"}
+                  onChange={(e) =>
+                    update({ speakerMode: e.target.checked ? "MODERATED" : "FREE" })
+                  }
+                />
+                <span>
+                  <strong>Chủ tọa điều hành lượt phát biểu</strong>
+                  <small>
+                    Mặc định tắt mic mọi người; ai muốn nói thì giơ tay và chờ chủ tọa mời.
+                    Hợp với hội thảo đông người; họp nội bộ vài người nên để tự do.
+                  </small>
+                </span>
+              </label>
               <p className="inline-note">
                 <ClipboardList size={14} />
                 Cả hai hình thức đều dùng chuẩn không giấy tờ: tài liệu số, chương trình
@@ -433,7 +462,7 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
           {roomOverCapacity && (
             <div className="alert warning">
               Phòng {selectedRoom.name} chỉ có {selectedRoom.capacity} chỗ nhưng thành
-              phần dự kiến {selectedIds.length + 1} người (gồm chủ trì). Cân nhắc đổi
+              phần dự kiến {selectedIds.length + 1} người (gồm chủ tọa). Cân nhắc đổi
               phòng hoặc chuyển hình thức kết hợp.
             </div>
           )}
@@ -452,6 +481,9 @@ export function MeetingWizard({ rooms, users, onSubmit, submitting }) {
               <span className="eyebrow">Thành phần tham dự</span>
               <strong>
                 {selectedIds.length}/{users.length} người được mời
+                {chairman
+                  ? ` · Chủ tọa: ${users.find((u) => u.id === chairman)?.full_name || ""}`
+                  : " · Chưa chỉ định chủ tọa"}
                 {secretary
                   ? ` · Thư ký: ${users.find((u) => u.id === secretary)?.full_name || ""}`
                   : " · Chưa chỉ định thư ký"}

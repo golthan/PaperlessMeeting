@@ -1,9 +1,6 @@
 import express from "express";
-import QRCode from "qrcode";
-import { v4 as uuid } from "uuid";
 import { pool } from "../../config/db.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
-import { requireRole } from "../../middlewares/role.middleware.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { badRequest, notFound } from "../../utils/httpError.js";
 import {
@@ -13,7 +10,7 @@ import {
 } from "../../utils/validators.js";
 import {
   assertMeetingAccess,
-  assertMeetingOrganizer,
+  assertMeetingSecretaryDuties,
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
 import { emitMeetingEvent } from "../../config/socket.js";
@@ -30,59 +27,14 @@ export const attendanceRouter = express.Router({ mergeParams: true });
 attendanceRouter.use(authenticate);
 
 attendanceRouter.post(
-  "/qr",
-  requireRole("ORGANIZER"),
-  asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.meetingId);
-    const token = uuid();
-    const expiresInMinutes = Number(req.body.expiresInMinutes || 60);
-    const expiresAt =
-      expiresInMinutes > 0
-        ? new Date(Date.now() + expiresInMinutes * 60 * 1000)
-        : null;
-
-    const { rows } = await pool.query(
-      `INSERT INTO attendance_tokens (meeting_id, token, expires_at, created_by)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [req.params.meetingId, token, expiresAt, req.user.id]
-    );
-
-    const payload = JSON.stringify({ meetingId: req.params.meetingId, token });
-    const qrDataUrl = await QRCode.toDataURL(payload);
-    await writeAuditLog(req, {
-      action: AUDIT_ACTIONS.ATTENDANCE_QR,
-      entityType: "MEETING",
-      entityId: req.params.meetingId,
-      meetingId: req.params.meetingId,
-      description: `Tạo mã QR điểm danh, hiệu lực ${expiresInMinutes} phút`
-    });
-
-    res.status(201).json({ data: rows[0], qrDataUrl, payload });
-  })
-);
-
-attendanceRouter.post(
   "/checkin",
-  requireRole("PARTICIPANT"),
   asyncHandler(async (req, res) => {
     const meeting = await assertParticipantAccess(req.user, req.params.meetingId);
     if (meeting.status !== "ONGOING") {
       throw badRequest("Chỉ điểm danh được khi cuộc họp đang diễn ra");
     }
 
-    let method = "MANUAL";
-    if (req.body.token) {
-      const { rows } = await pool.query(
-        `SELECT * FROM attendance_tokens
-         WHERE meeting_id = $1 AND token = $2
-           AND (expires_at IS NULL OR expires_at > now())`,
-        [req.params.meetingId, req.body.token]
-      );
-      if (!rows[0]) throw badRequest("Mã QR điểm danh không hợp lệ hoặc đã hết hạn");
-      method = "QR";
-    }
-
+    const method = "MANUAL";
     const current = await pool.query(
       `SELECT attendance_status FROM meeting_participants
        WHERE meeting_id = $1 AND user_id = $2`,
@@ -114,7 +66,7 @@ attendanceRouter.post(
       entityType: "MEETING",
       entityId: req.params.meetingId,
       meetingId: req.params.meetingId,
-      description: `Tự điểm danh (${status}) bằng hình thức ${method}`,
+      description: `Tự điểm danh (${status})`,
       metadata: { status, method }
     });
 
@@ -144,9 +96,8 @@ attendanceRouter.get(
 
 attendanceRouter.put(
   "/:userId",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.meetingId);
+    await assertMeetingSecretaryDuties(req.user, req.params.meetingId);
     requireFields(req.body, ["status"]);
     assertEnum(req.body.status, ATTENDANCE_STATUSES, "attendance status");
 
@@ -171,7 +122,7 @@ attendanceRouter.put(
       entityType: "MEETING",
       entityId: req.params.meetingId,
       meetingId: req.params.meetingId,
-      description: `Chủ trì ghi nhận điểm danh: ${row.full_name || req.params.userId} → ${req.body.status}`,
+      description: `Thư ký ghi nhận điểm danh: ${row.full_name || req.params.userId} → ${req.body.status}`,
       metadata: { targetUserId: req.params.userId, status: req.body.status }
     });
 

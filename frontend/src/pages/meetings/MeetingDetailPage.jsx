@@ -9,7 +9,6 @@ import {
   Mic,
   Pencil,
   Plus,
-  QrCode,
   Save,
   Send,
   Trash2,
@@ -20,13 +19,15 @@ import {
   Vote,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../api/client.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
+import { DocumentWorkspace } from "../../components/DocumentWorkspace.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
 import { PageHeader } from "../../components/PageHeader.jsx";
 import { StatusPill } from "../../components/StatusPill.jsx";
+import { TranscriptPanel } from "../../components/TranscriptPanel.jsx";
 import { useToast } from "../../components/ToastProvider.jsx";
 import { MinutesPanel } from "../../components/MinutesPanel.jsx";
 import { VoteCard } from "../../components/VoteCard.jsx";
@@ -37,24 +38,68 @@ import {
   hasOnlineRoom,
   MEETING_MODES,
   meetingPlaceLabel,
+  meetingTypeLabel,
   percent,
   resolveMeetingType
 } from "../../utils/meeting.js";
+import { voteAnswerLabel } from "../../utils/meeting.js";
 
 const ROLE_LABELS = {
+  CHAIRMAN: "Chủ tọa",
   SECRETARY: "Thư ký",
   MEMBER: "Thành viên"
 };
 
+/** Vai trò gán được cho người khác; chủ tọa đổi bằng nút riêng nên không có ở đây. */
+const ASSIGNABLE_ROLES = ["SECRETARY", "MEMBER"];
+
 const BASE_TABS = [
   ["overview", "Tổng quan"],
   ["documents", "Tài liệu"],
+  ["discussion", "Ý kiến"],
+  ["transcript", "Lời nói"],
   ["agenda", "Chương trình"],
   ["attendance", "Điểm danh"],
   ["votes", "Biểu quyết"],
   ["minutes", "Biên bản"],
   ["tasks", "Nhiệm vụ"]
 ];
+
+const SPEAKER_MODE_LABELS = {
+  FREE: "Tự do phát biểu",
+  MODERATED: "Chủ tọa mời mới được phát biểu"
+};
+
+function Fact({ label, children }) {
+  return (
+    <div className="fact">
+      <span className="fact-label">{label}</span>
+      <strong className="fact-value">{children || "-"}</strong>
+    </div>
+  );
+}
+
+/** Khoảng thời gian họp, viết gọn theo giờ nếu hai đầu cùng một ngày. */
+function meetingTimeRange(meeting) {
+  const start = new Date(meeting.start_time);
+  const end = new Date(meeting.end_time);
+  const sameDay = start.toDateString() === end.toDateString();
+  const endText = sameDay
+    ? end.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })
+    : formatDateTime(meeting.end_time);
+  return `${formatDateTime(meeting.start_time)} → ${endText}`;
+}
+
+function meetingDuration(meeting) {
+  const minutes = Math.round(
+    (new Date(meeting.end_time) - new Date(meeting.start_time)) / 60000
+  );
+  if (!Number.isFinite(minutes) || minutes <= 0) return "-";
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (!hours) return `${rest} phút`;
+  return rest ? `${hours} giờ ${rest} phút` : `${hours} giờ`;
+}
 
 async function downloadBlob(path, filename) {
   const res = await api.get(path, { responseType: "blob" });
@@ -75,7 +120,6 @@ export function MeetingDetailPage() {
   const [activeTab, setActiveTab] = useState("overview");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [qr, setQr] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [editOpen, setEditOpen] = useState(false);
@@ -84,7 +128,6 @@ export function MeetingDetailPage() {
   const [agendaEditId, setAgendaEditId] = useState(null);
   const [agendaEditForm, setAgendaEditForm] = useState(null);
   const [voteResults, setVoteResults] = useState({});
-  const [documentForm, setDocumentForm] = useState({ file: null, displayName: "", description: "" });
   const [agendaForm, setAgendaForm] = useState({
     title: "",
     description: "",
@@ -99,6 +142,17 @@ export function MeetingDetailPage() {
     options: "Phương án 1\nPhương án 2"
   });
   const [auditLogs, setAuditLogs] = useState([]);
+  // Ý kiến nêu trong phòng họp và phần tổng hợp của thư ký / AI.
+  const [roomMessages, setRoomMessages] = useState([]);
+  const [publicNotes, setPublicNotes] = useState(null);
+  // Bản ghi lời nói, đọc lại được cả sau khi phòng họp đã đóng.
+  const [transcript, setTranscript] = useState([]);
+  // Hộp tài liệu dùng chung với phòng họp, nhưng ở đây chạy hoàn toàn bằng REST
+  // nên vẫn mở được sau khi cuộc họp kết thúc — phòng họp realtime thì đã đóng.
+  const [documentMessages, setDocumentMessages] = useState([]);
+  const [documentNotes, setDocumentNotes] = useState({});
+  const [documentQuestions, setDocumentQuestions] = useState({});
+  const [aiEnabled, setAiEnabled] = useState(false);
   const [taskForm, setTaskForm] = useState({
     assignedTo: "",
     title: "",
@@ -107,16 +161,19 @@ export function MeetingDetailPage() {
     priority: "MEDIUM"
   });
 
+  // Vai trò toàn cục chỉ còn quyết định đường dẫn; mọi quyền thao tác lấy từ
+  // vai trò trong chính cuộc họp này do máy chủ trả về.
   const isOrganizer = user.role === "ORGANIZER";
   const isParticipant = user.role === "PARTICIPANT";
+  const perm = meeting?.permissions || {};
   const onlineRoomOn = hasOnlineRoom(meeting);
-  // Chủ trì và thư ký của cuộc họp là hai người được ký số biên bản.
-  const canSignMinutes =
-    isOrganizer ||
-    asArray(meeting?.participants).some(
-      (item) => item.user_id === user.id && item.role_in_meeting === "SECRETARY"
-    );
-  const tabs = isOrganizer ? [...BASE_TABS, ["audit", "Nhật ký"]] : BASE_TABS;
+  const canSignMinutes = perm.canSignMinutes === true;
+  // Cột quyền hiện cho cả chủ tọa lẫn thư ký, nhưng mỗi người chỉ bấm được
+  // đúng ô thuộc thẩm quyền của mình.
+  const showPermissionColumn = Boolean(
+    perm.canManageParticipants || perm.canControlSpeakers
+  );
+  const tabs = perm.canViewAuditLog ? [...BASE_TABS, ["audit", "Nhật ký"]] : BASE_TABS;
   const livePath = isOrganizer
     ? `/organizer/meetings/${id}/live`
     : isParticipant
@@ -137,26 +194,98 @@ export function MeetingDetailPage() {
     }));
   }
 
+  /** Thảo luận gắn với từng tài liệu, tách khỏi chat chung của phòng họp. */
+  const loadDocumentMessages = useCallback(async () => {
+    try {
+      const res = await api.get(`/meetings/${id}/chat`, { params: { limit: 200 } });
+      setDocumentMessages((res.data.data || []).filter((item) => item.document_id));
+    } catch {
+      setDocumentMessages([]);
+    }
+  }, [id]);
+
+  const loadDocumentNotes = useCallback(async (documentId) => {
+    try {
+      const res = await api.get(`/documents/${documentId}/notes`);
+      setDocumentNotes((current) => ({
+        ...current,
+        [documentId]: res.data.data || { document_id: documentId, content: "" }
+      }));
+    } catch {
+      // Không tải được ghi chú thì để trống, không chặn thao tác khác.
+    }
+  }, []);
+
+  const loadDocumentQuestions = useCallback(async (documentId) => {
+    try {
+      const res = await api.get(`/documents/${documentId}/questions`);
+      setDocumentQuestions((current) => ({ ...current, [documentId]: res.data.data || [] }));
+    } catch {
+      // Không tải được thì để trống.
+    }
+  }, []);
+
+  /**
+   * Ý kiến nêu trong phòng họp — phần "thảo luận chung", không gắn tài liệu nào.
+   *
+   * Đọc bằng REST nên xem lại được cả khi cuộc họp đã kết thúc và phòng realtime
+   * đã đóng, đúng tinh thần hồ sơ cuộc họp còn nguyên sau khi họp xong.
+   */
+  const loadDiscussion = useCallback(async () => {
+    const [chat, notes] = await Promise.allSettled([
+      api.get(`/meetings/${id}/chat`, { params: { scope: "room", limit: 200 } }),
+      api.get(`/meetings/${id}/public-notes`)
+    ]);
+    setRoomMessages(chat.status === "fulfilled" ? chat.value.data.data || [] : []);
+    setPublicNotes(notes.status === "fulfilled" ? notes.value.data.data : null);
+  }, [id]);
+
+  /**
+   * Bản ghi lời nói cùng bản tổng hợp của AI.
+   *
+   * Đọc bằng REST nên mở lại được sau khi cuộc họp kết thúc — lúc đó phòng họp
+   * realtime đã đóng nhưng hồ sơ cuộc họp vẫn phải còn nguyên.
+   */
+  const loadTranscript = useCallback(async () => {
+    const [segments, notes] = await Promise.allSettled([
+      api.get(`/meetings/${id}/transcript`, { params: { limit: 100 } }),
+      api.get(`/meetings/${id}/public-notes`)
+    ]);
+    setTranscript(segments.status === "fulfilled" ? segments.value.data.data || [] : []);
+    if (notes.status === "fulfilled") setPublicNotes(notes.value.data.data);
+  }, [id]);
+
   useEffect(() => {
     load().catch((err) => setError(err.response?.data?.message || "Không tải được cuộc họp"));
-    if (user.role === "ORGANIZER") {
-      Promise.all([api.get("/rooms"), api.get("/users", { params: { limit: 200 } })])
-        .then(([roomsRes, usersRes]) => {
-          setRooms(roomsRes.data.data || []);
-          setAllUsers(usersRes.data.data || []);
-        })
-        .catch(() => {});
-    }
-  }, [id, user.role]);
+  }, [id]);
 
-  // Nhật ký của riêng cuộc họp này, chỉ chủ trì xem được.
+  /**
+   * Danh bạ và danh sách phòng để mời thêm người / đổi phòng.
+   *
+   * Điều kiện là quyền TRONG cuộc họp chứ không phải vai trò toàn cục: thư ký
+   * hoặc chủ tọa có thể là một tài khoản Participant, mà trước đây nhánh này chỉ
+   * chạy cho ORGANIZER nên họ mở ra chỉ thấy ô chọn rỗng.
+   */
   useEffect(() => {
-    if (activeTab !== "audit" || user.role !== "ORGANIZER") return;
+    if (!perm.canManageParticipants && !perm.canEditMeeting) return;
+    api
+      .get(`/meetings/${id}/scheduling-options`)
+      .then((res) => {
+        setRooms(res.data.data?.rooms || []);
+        setAllUsers(res.data.data?.invitableUsers || []);
+      })
+      .catch(() => {});
+  }, [id, perm.canManageParticipants, perm.canEditMeeting]);
+
+  // Nhật ký của riêng cuộc họp này — theo quyền trong cuộc họp, giống hệt điều
+  // kiện hiện tab, nếu không thì tab mở ra mà không bao giờ có dữ liệu.
+  useEffect(() => {
+    if (activeTab !== "audit" || !perm.canViewAuditLog) return;
     api
       .get(`/meetings/${id}/audit-logs`, { params: { limit: 100 } })
       .then((res) => setAuditLogs(res.data.data || []))
       .catch(() => setAuditLogs([]));
-  }, [activeTab, id, user.role]);
+  }, [activeTab, id, perm.canViewAuditLog]);
 
   // Mọi thông báo thành công/lỗi của trang đều bật thêm toast ở góc phải trên.
   useEffect(() => {
@@ -167,10 +296,28 @@ export function MeetingDetailPage() {
     if (error) toast.error(error);
   }, [error, toast]);
 
+  // Tài liệu là phần dùng lại nhiều nhất sau khi họp xong, nên nạp thảo luận
+  // ngay khi mở tab thay vì chờ người dùng bấm vào từng file.
+  useEffect(() => {
+    if (activeTab === "documents") loadDocumentMessages();
+    if (activeTab === "discussion") loadDiscussion();
+    if (activeTab === "transcript") loadTranscript();
+  }, [activeTab, loadDocumentMessages, loadDiscussion, loadTranscript]);
+
+  // Tính năng AI chỉ hiện khi backend đã cấu hình khoá API.
+  useEffect(() => {
+    api
+      .get("/documents/ai/status")
+      .then((res) => setAiEnabled(Boolean(res.data.data?.configured)))
+      .catch(() => setAiEnabled(false));
+  }, []);
+
   const participants = asArray(meeting?.participants);
   const myParticipant = participants.find((item) => item.user_id === user.id);
   const checkedIn = ["PRESENT", "LATE"].includes(myParticipant?.attendance_status);
   const attendance = useMemo(() => attendanceSummary(participants), [participants]);
+  const chairman = participants.find((item) => item.role_in_meeting === "CHAIRMAN");
+  const secretary = participants.find((item) => item.role_in_meeting === "SECRETARY");
   const participantOptions = useMemo(
     () => participants.map((item) => ({ value: item.user_id, label: `${item.full_name} - ${item.email}` })),
     [participants]
@@ -191,11 +338,10 @@ export function MeetingDetailPage() {
   }
 
   const meetingEditable = meeting && !["FINISHED", "CANCELLED"].includes(meeting.status);
+  // Máy chủ đã loại người có trong cuộc họp, nhưng vẫn lọc lại để danh sách
+  // không hiện người vừa được mời xong trong lúc chờ tải lại.
   const invitableUsers = allUsers.filter(
-    (item) =>
-      item.role === "PARTICIPANT" &&
-      item.status === "ACTIVE" &&
-      !participants.some((p) => p.user_id === item.id)
+    (item) => !participants.some((p) => p.user_id === item.id)
   );
 
   function openEdit() {
@@ -257,10 +403,97 @@ export function MeetingDetailPage() {
     setNewParticipant({ userId: "", roleInMeeting: "MEMBER" });
   }
 
-  async function updateParticipant(userId, patch) {
+  async function saveDocumentNotes(documentId, content) {
+    try {
+      const res = await api.put(`/documents/${documentId}/notes`, { content });
+      setDocumentNotes((current) => ({ ...current, [documentId]: res.data.data }));
+      setMessage("Đã lưu ghi chú tài liệu");
+    } catch (err) {
+      setError(err.response?.data?.message || "Không lưu được ghi chú tài liệu");
+    }
+  }
+
+  /**
+   * Gửi tin qua REST rồi tự chèn bản ghi trả về: trang này không mở socket nên
+   * không nhận được bản máy chủ phát lại.
+   */
+  async function sendDocumentMessage(documentId, content) {
+    try {
+      const res = await api.post(`/meetings/${id}/chat`, { content, documentId });
+      const sent = res.data.data;
+      setDocumentMessages((current) =>
+        current.some((item) => item.id === sent.id) ? current : [...current, sent]
+      );
+    } catch (err) {
+      setError(err.response?.data?.message || "Không gửi được tin nhắn");
+    }
+  }
+
+  async function askDocumentAi(document, question) {
+    try {
+      const res = await api.post(`/documents/${document.id}/ask`, { question });
+      setDocumentQuestions((current) => ({
+        ...current,
+        [document.id]: [...(current[document.id] || []), res.data.data]
+      }));
+      return true;
+    } catch (err) {
+      setError(err.response?.data?.message || "Không hỏi được AI về tài liệu");
+      return false;
+    }
+  }
+
+  async function summarizeDocumentAi(document) {
+    try {
+      await api.post(`/documents/${document.id}/summary`);
+      setMessage("AI đã tóm tắt xong tài liệu");
+      await load();
+      return true;
+    } catch (err) {
+      setError(err.response?.data?.message || "Không tóm tắt được tài liệu");
+      return false;
+    }
+  }
+
+  /** Đăng tài liệu từ hộp làm việc; trả bản ghi để hộp mở luôn file vừa gửi. */
+  async function uploadDocumentFile(formData) {
+    try {
+      const res = await api.post(`/meetings/${id}/documents`, formData, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
+      setMessage(
+        res.data.data.status === "APPROVED"
+          ? "Đã đăng tài liệu cho cả cuộc họp"
+          : "Đã gửi tài liệu, chờ chủ tọa duyệt"
+      );
+      await load();
+      return res.data.data;
+    } catch (err) {
+      setError(err.response?.data?.message || "Không đăng được tài liệu");
+      return null;
+    }
+  }
+
+  async function updateParticipantPermissions(userId, patch) {
     await run(
-      () => api.put(`/meetings/${id}/participants/${userId}`, patch),
+      () => api.put(`/meetings/${id}/participants/${userId}/permissions`, patch),
       "Đã cập nhật quyền người tham dự"
+    );
+  }
+
+  /** Quyền phát biểu — chủ tọa quyết định. */
+  async function updateParticipantSpeak(userId, canSpeak) {
+    await run(
+      () => api.put(`/meetings/${id}/participants/${userId}/speak`, { canSpeak }),
+      canSpeak ? "Đã cấp quyền phát biểu" : "Đã thu quyền phát biểu"
+    );
+  }
+
+  /** Chỉ định thư ký — chủ tọa quyết định. */
+  async function updateParticipantRole(userId, roleInMeeting) {
+    await run(
+      () => api.put(`/meetings/${id}/participants/${userId}/role`, { roleInMeeting }),
+      "Đã đổi vai trò trong cuộc họp"
     );
   }
 
@@ -343,23 +576,6 @@ export function MeetingDetailPage() {
     );
   }
 
-  async function uploadDocument(event) {
-    event.preventDefault();
-    if (!documentForm.file) {
-      setError("Vui lòng chọn file");
-      return;
-    }
-    const payload = new FormData();
-    payload.append("file", documentForm.file);
-    payload.append("displayName", documentForm.displayName);
-    payload.append("description", documentForm.description);
-    await run(
-      () => api.post(`/meetings/${id}/documents`, payload, { headers: { "Content-Type": "multipart/form-data" } }),
-      isOrganizer ? "Đã upload tài liệu" : "Đã gửi tài liệu chờ duyệt"
-    );
-    setDocumentForm({ file: null, displayName: "", description: "" });
-  }
-
   async function addAgenda(event) {
     event.preventDefault();
     await run(
@@ -372,16 +588,6 @@ export function MeetingDetailPage() {
       "Đã thêm agenda"
     );
     setAgendaForm({ title: "", description: "", presenterId: "", durationMinutes: 10 });
-  }
-
-  async function createQr() {
-    setError("");
-    try {
-      const res = await api.post(`/meetings/${id}/attendance/qr`, { expiresInMinutes: 60 });
-      setQr(res.data);
-    } catch (err) {
-      setError(err.response?.data?.message || "Không tạo được QR");
-    }
   }
 
   /** Tạo biểu quyết: mặc định lưu nháp, openNow = true thì mở lấy ý kiến ngay. */
@@ -440,7 +646,7 @@ export function MeetingDetailPage() {
   async function answerVote(voteId, answer) {
     await run(
       () => api.post(`/votes/${voteId}/responses`, { answer }),
-      `Đã gửi phiếu: ${answer}`
+      `Đã gửi phiếu: ${voteAnswerLabel(answer)}`
     );
   }
 
@@ -520,7 +726,7 @@ export function MeetingDetailPage() {
               Vào phòng họp
             </Link>
           )}
-          {isOrganizer && (
+          {perm.canEditMeeting && (
             <>
               {meetingEditable && meeting.meeting_type !== "ONLINE" && (
                 <button
@@ -561,7 +767,7 @@ export function MeetingDetailPage() {
         </div>
       </section>
 
-      {isOrganizer && editOpen && editForm && (
+      {perm.canEditMeeting && editOpen && editForm && (
         <section className="panel">
           <div className="section-heading">
             <div>
@@ -700,9 +906,78 @@ export function MeetingDetailPage() {
       {activeTab === "overview" && (
         <section className="panel">
           <div className="section-heading">
+            <div>
+              <span className="eyebrow">Thông tin cuộc họp</span>
+              <h2>Những gì đã chốt khi lập lịch</h2>
+            </div>
+          </div>
+          <div className="fact-grid">
+            <Fact label="Thời gian">{meetingTimeRange(meeting)}</Fact>
+            <Fact label="Thời lượng dự kiến">{meetingDuration(meeting)}</Fact>
+            <Fact label="Địa điểm">
+              {meetingPlaceLabel(meeting)}
+              {meeting.room_location ? ` · ${meeting.room_location}` : ""}
+            </Fact>
+            <Fact label="Hình thức">{meetingTypeLabel(meeting.meeting_type)}</Fact>
+            <Fact label="Trạng thái">
+              <StatusPill value={meeting.status} />
+            </Fact>
+            <Fact label="Chủ tọa">{chairman?.full_name}</Fact>
+            <Fact label="Thư ký">{secretary?.full_name}</Fact>
+            <Fact label="Người lập lịch">{meeting.organizer_name}</Fact>
+            <Fact label="Chế độ phát biểu">
+              {SPEAKER_MODE_LABELS[meeting.speaker_mode || "FREE"]}
+            </Fact>
+            <Fact label="Tạo lúc">{formatDateTime(meeting.created_at)}</Fact>
+            <Fact label="Thành phần">{participants.length} người</Fact>
+            <Fact label="Tài liệu">{asArray(meeting.documents).length} tệp</Fact>
+            <Fact label="Nội dung chương trình">
+              {asArray(meeting.agenda).length} mục
+            </Fact>
+            <Fact label="Biểu quyết">{asArray(meeting.votes).length} phiên</Fact>
+            <Fact label="Nhiệm vụ">{asArray(meeting.tasks).length} việc</Fact>
+            <Fact label="Biên bản">
+              {meeting.minutes ? <StatusPill value={meeting.minutes.status} /> : "Chưa có"}
+            </Fact>
+          </div>
+
+          {meeting.description && (
+            <div className="fact-block">
+              <span className="fact-label">Mô tả</span>
+              <p>{meeting.description}</p>
+            </div>
+          )}
+          {meeting.notes && (
+            <div className="fact-block">
+              <span className="fact-label">Ghi chú khi lập lịch</span>
+              <p>{meeting.notes}</p>
+            </div>
+          )}
+          {asArray(meeting.agenda).length > 0 && (
+            <div className="fact-block">
+              <span className="fact-label">Chương trình dự kiến</span>
+              <ol className="fact-agenda">
+                {asArray(meeting.agenda).map((item) => (
+                  <li key={item.id}>
+                    <strong>{item.title}</strong>
+                    <span className="muted small">
+                      {item.presenter_name ? `${item.presenter_name} · ` : ""}
+                      {item.duration_minutes || 0} phút
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </section>
+      )}
+
+      {activeTab === "overview" && (
+        <section className="panel">
+          <div className="section-heading">
             <h2>Người tham dự ({participants.length})</h2>
           </div>
-          {isOrganizer && meetingEditable && (
+          {perm.canManageParticipants && meetingEditable && (
             <form className="inline-form" onSubmit={addParticipant}>
               <select
                 value={newParticipant.userId}
@@ -721,9 +996,9 @@ export function MeetingDetailPage() {
                   setNewParticipant({ ...newParticipant, roleInMeeting: e.target.value })
                 }
               >
-                {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                {ASSIGNABLE_ROLES.map((value) => (
                   <option key={value} value={value}>
-                    {label}
+                    {ROLE_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -744,10 +1019,10 @@ export function MeetingDetailPage() {
                     <th>Họ tên</th>
                     <th>Phòng ban</th>
                     <th>Vai trò</th>
-                    {isOrganizer && <th>Quyền trong họp</th>}
+                    {showPermissionColumn && <th>Quyền trong họp</th>}
                     <th>Lời mời</th>
                     <th>Điểm danh</th>
-                    {isOrganizer && meetingEditable && <th></th>}
+                    {perm.canManageParticipants && meetingEditable && <th></th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -759,46 +1034,51 @@ export function MeetingDetailPage() {
                       </td>
                       <td>{item.department_name || "-"}</td>
                       <td>
-                        {isOrganizer && meetingEditable ? (
+                        {perm.canEditMeeting &&
+                        meetingEditable &&
+                        item.role_in_meeting !== "CHAIRMAN" ? (
                           <select
                             className="table-select"
                             value={item.role_in_meeting || "MEMBER"}
                             onChange={(e) =>
-                              updateParticipant(item.user_id, { roleInMeeting: e.target.value })
+                              updateParticipantRole(item.user_id, e.target.value)
                             }
                           >
-                            {Object.entries(ROLE_LABELS).map(([value, label]) => (
-                              <option key={value} value={value}>
-                                {label}
-                              </option>
-                            ))}
+                            <option value="MEMBER">{ROLE_LABELS.MEMBER}</option>
+                            <option value="SECRETARY">{ROLE_LABELS.SECRETARY}</option>
                           </select>
                         ) : (
                           ROLE_LABELS[item.role_in_meeting] || item.role_in_meeting
                         )}
                       </td>
-                      {isOrganizer && (
+                      {showPermissionColumn && (
                         <td>
                           <div className="person-config">
-                            <label className="perm-toggle" title="Quyền phát biểu (mic/camera)">
+                            <label
+                              className="perm-toggle"
+                              title="Quyền phát biểu — chủ tọa quyết định"
+                            >
                               <input
                                 type="checkbox"
                                 checked={item.can_speak !== false}
-                                disabled={!meetingEditable}
+                                disabled={!meetingEditable || !perm.canControlSpeakers}
                                 onChange={(e) =>
-                                  updateParticipant(item.user_id, { canSpeak: e.target.checked })
+                                  updateParticipantSpeak(item.user_id, e.target.checked)
                                 }
                               />
                               <Mic size={13} />
                               Phát biểu
                             </label>
-                            <label className="perm-toggle" title="Quyền chia sẻ màn hình">
+                            <label
+                              className="perm-toggle"
+                              title="Quyền chia sẻ màn hình — thư ký quyết định"
+                            >
                               <input
                                 type="checkbox"
                                 checked={Boolean(item.can_share_screen)}
-                                disabled={!meetingEditable}
+                                disabled={!meetingEditable || !perm.canManageParticipants}
                                 onChange={(e) =>
-                                  updateParticipant(item.user_id, {
+                                  updateParticipantPermissions(item.user_id, {
                                     canShareScreen: e.target.checked
                                   })
                                 }
@@ -806,13 +1086,16 @@ export function MeetingDetailPage() {
                               <MonitorUp size={13} />
                               Chia sẻ
                             </label>
-                            <label className="perm-toggle" title="Quyền tải tài liệu lên">
+                            <label
+                              className="perm-toggle"
+                              title="Quyền gửi tài liệu — thư ký quyết định"
+                            >
                               <input
                                 type="checkbox"
                                 checked={Boolean(item.can_upload_document)}
-                                disabled={!meetingEditable}
+                                disabled={!meetingEditable || !perm.canManageParticipants}
                                 onChange={(e) =>
-                                  updateParticipant(item.user_id, {
+                                  updateParticipantPermissions(item.user_id, {
                                     canUploadDocument: e.target.checked
                                   })
                                 }
@@ -829,7 +1112,7 @@ export function MeetingDetailPage() {
                       <td>
                         <StatusPill value={item.attendance_status || "ABSENT"} />
                       </td>
-                      {isOrganizer && meetingEditable && (
+                      {perm.canManageParticipants && meetingEditable && (
                         <td className="row-actions">
                           <button
                             className="icon-button danger"
@@ -852,77 +1135,125 @@ export function MeetingDetailPage() {
       {activeTab === "documents" && (
         <section className="panel">
           <div className="section-heading">
-            <h2>Tài liệu cuộc họp</h2>
+            <div>
+              <span className="eyebrow">Tài liệu</span>
+              <h2>Hồ sơ tài liệu cuộc họp</h2>
+            </div>
           </div>
-          {(isOrganizer || isParticipant) && (
-            <form className="inline-form" onSubmit={uploadDocument}>
-              <input type="file" onChange={(e) => setDocumentForm({ ...documentForm, file: e.target.files[0] })} />
-              <input
-                placeholder="Tên hiển thị"
-                value={documentForm.displayName}
-                onChange={(e) => setDocumentForm({ ...documentForm, displayName: e.target.value })}
-              />
-              <input
-                placeholder="Mô tả"
-                value={documentForm.description}
-                onChange={(e) => setDocumentForm({ ...documentForm, description: e.target.value })}
-              />
-              <button className="primary-button">
-                <FileText size={16} />
-                Upload
-              </button>
-            </form>
-          )}
-          {asArray(meeting.documents).length === 0 ? (
-            <EmptyState title="Chưa có tài liệu" />
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Tài liệu</th>
-                    <th>Người gửi</th>
-                    <th>Trạng thái</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {meeting.documents.map((doc) => (
-                    <tr key={doc.id}>
-                      <td>
-                        <strong>{doc.display_name}</strong>
-                        <span className="table-subtext">{doc.original_name}</span>
-                      </td>
-                      <td>{doc.uploaded_by_name}</td>
-                      <td>
-                        <StatusPill value={doc.status} kind="document" />
-                      </td>
-                      <td className="row-actions">
-                        <button className="icon-button" title="Tải xuống" onClick={() => downloadBlob(`/documents/${doc.id}/download`, doc.original_name)}>
-                          <Download size={16} />
-                        </button>
-                        {isOrganizer && doc.status === "PENDING" && (
-                          <>
-                            <button className="icon-button" title="Duyệt" onClick={() => run(() => api.put(`/documents/${doc.id}/approve`))}>
-                              <Check size={16} />
-                            </button>
-                            <button className="icon-button danger" title="Từ chối" onClick={() => run(() => api.put(`/documents/${doc.id}/reject`))}>
-                              <Trash2 size={16} />
-                            </button>
-                          </>
-                        )}
-                        {isOrganizer && (
-                          <button className="icon-button danger" title="Xóa" onClick={() => run(() => api.delete(`/documents/${doc.id}`))}>
-                            <Trash2 size={16} />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <p className="muted small">
+            {meetingEditable
+              ? "Chọn một tài liệu để xem nội dung, trao đổi và ghi chú cùng cả phòng."
+              : "Cuộc họp đã khép lại nhưng hồ sơ tài liệu vẫn mở: xem nội dung, đọc lại trao đổi, ghi chú và tóm tắt AI đều còn nguyên."}
+          </p>
+          <DocumentWorkspace
+            documents={asArray(meeting.documents)}
+            messages={documentMessages}
+            notes={documentNotes}
+            questions={documentQuestions}
+            canManage={perm.canReviewDocument && meetingEditable}
+            canUpload={perm.canUploadDocument && meetingEditable}
+            canEditNotes={perm.canEditSharedNotes}
+            canSummarize={perm.canEditSharedNotes}
+            aiEnabled={aiEnabled}
+            meetingClosed={!meetingEditable}
+            currentUserId={user.id}
+            onUpload={uploadDocumentFile}
+            onApprove={(doc) =>
+              run(() => api.put(`/documents/${doc.id}/approve`), "Đã duyệt tài liệu")
+            }
+            onReject={(doc) =>
+              run(() => api.put(`/documents/${doc.id}/reject`), "Đã từ chối tài liệu")
+            }
+            onDelete={(doc) =>
+              run(() => api.delete(`/documents/${doc.id}`), "Đã xoá tài liệu")
+            }
+            onSend={sendDocumentMessage}
+            onLoadNotes={loadDocumentNotes}
+            onSaveNotes={saveDocumentNotes}
+            onLoadQuestions={loadDocumentQuestions}
+            onAsk={askDocumentAi}
+            onSummarize={summarizeDocumentAi}
+          />
+        </section>
+      )}
+
+      {activeTab === "discussion" && (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Ý kiến</span>
+              <h2>Thảo luận chung của cuộc họp</h2>
+            </div>
+          </div>
+          <p className="muted small">
+            Toàn bộ ý kiến nêu trong phòng họp, đọc lại được cả sau khi cuộc họp
+            kết thúc. Trao đổi gắn với từng tài liệu nằm ở tab Tài liệu.
+          </p>
+
+          {publicNotes?.ai_summary && (
+            <div className="fact-block ai-summary">
+              <span className="fact-label">
+                Bản tổng hợp của AI
+                {publicNotes.ai_summary_message_count
+                  ? ` · từ ${publicNotes.ai_summary_message_count} ý kiến`
+                  : ""}
+                {publicNotes.ai_summary_updated_at
+                  ? ` · ${formatDateTime(publicNotes.ai_summary_updated_at)}`
+                  : ""}
+              </span>
+              <pre className="summary-text">{publicNotes.ai_summary}</pre>
             </div>
           )}
+
+          {publicNotes?.content && (
+            <div className="fact-block">
+              <span className="fact-label">
+                Ghi chú chung của thư ký
+                {publicNotes.updated_by_name ? ` · ${publicNotes.updated_by_name}` : ""}
+              </span>
+              <pre className="summary-text">{publicNotes.content}</pre>
+            </div>
+          )}
+
+          {roomMessages.length === 0 ? (
+            <EmptyState
+              title="Chưa có ý kiến nào"
+              description="Ý kiến nêu trong phòng họp trực tuyến sẽ hiện ở đây."
+            />
+          ) : (
+            <ul className="opinion-list">
+              {roomMessages.map((item) => (
+                <li key={item.id} className="opinion-item">
+                  <div className="opinion-head">
+                    <strong>{item.sender_name}</strong>
+                    <span className="muted small">{formatDateTime(item.created_at)}</span>
+                  </div>
+                  <p>{item.content}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {activeTab === "transcript" && (
+        <section className="panel">
+          <p className="muted small">
+            Lời phát biểu được nhận dạng ngay trên máy người nói rồi ghi lại kèm tên
+            và giờ. Đọc lại được cả sau khi cuộc họp kết thúc.
+          </p>
+          <TranscriptPanel
+            meetingId={id}
+            segments={transcript}
+            canRecord={false}
+            canEdit={perm.canEditSharedNotes && meetingEditable}
+            canSummarize={perm.canEditSharedNotes}
+            aiEnabled={aiEnabled}
+            aiSummary={publicNotes}
+            onReload={loadTranscript}
+            onNotice={setMessage}
+            onError={setError}
+          />
         </section>
       )}
 
@@ -931,7 +1262,7 @@ export function MeetingDetailPage() {
           <div className="section-heading">
             <h2>Chương trình họp</h2>
           </div>
-          {isOrganizer && (
+          {perm.canManageAgendaItems && (
             <form className="inline-form" onSubmit={addAgenda}>
               <input
                 placeholder="Tiêu đề"
@@ -1048,7 +1379,7 @@ export function MeetingDetailPage() {
                         </span>{" "}
                         <StatusPill value={item.status} kind="agenda" />
                       </div>
-                      {isOrganizer && (
+                      {perm.canManageAgendaItems && (
                         <div className="row-actions">
                           <button
                             className="icon-button"
@@ -1099,13 +1430,7 @@ export function MeetingDetailPage() {
               <h2>Thành phần có mặt</h2>
             </div>
             <div className="row-actions">
-              {isOrganizer && (
-                <button className="secondary-button" onClick={createQr}>
-                  <QrCode size={16} />
-                  Tạo mã QR điểm danh
-                </button>
-              )}
-              {isParticipant && (
+              {!perm.isChairman && (
                 <button
                   className="primary-button"
                   disabled={meeting.status !== "ONGOING" || checkedIn}
@@ -1143,17 +1468,10 @@ export function MeetingDetailPage() {
           </div>
 
           <p className="muted small">
-            Bốn cách ghi nhận: quét mã QR tại phòng họp, người dự tự bấm điểm danh khi
-            cuộc họp đang diễn ra, tự động khi vào phòng họp trên hệ thống, hoặc chủ trì
-            ghi nhận thủ công. Vào sau giờ bắt đầu quá 10 phút được tính là đi muộn.
+            Ba cách ghi nhận: người dự tự bấm điểm danh khi cuộc họp đang diễn ra, tự
+            động khi vào phòng họp trên hệ thống, hoặc chủ tọa ghi nhận thủ công. Vào sau
+            giờ bắt đầu quá 10 phút được tính là đi muộn; không vào thì để là vắng mặt.
           </p>
-
-          {qr?.qrDataUrl && (
-            <div className="qr-box">
-              <img src={qr.qrDataUrl} alt="Mã QR điểm danh" />
-              <span>Mã hết hạn lúc: {formatDateTime(qr.data.expires_at)}</span>
-            </div>
-          )}
 
           <div className="table-wrap">
             <table>
@@ -1163,7 +1481,7 @@ export function MeetingDetailPage() {
                   <th>Trạng thái</th>
                   <th>Hình thức</th>
                   <th>Thời gian</th>
-                  {isOrganizer && <th>Chủ trì ghi nhận</th>}
+                  {perm.canMarkAttendance && <th>Thư ký ghi nhận</th>}
                 </tr>
               </thead>
               <tbody>
@@ -1178,7 +1496,7 @@ export function MeetingDetailPage() {
                     </td>
                     <td>{attendanceMethodLabel(item.attendance_method)}</td>
                     <td>{item.checked_in_at ? formatDateTime(item.checked_in_at) : "-"}</td>
-                    {isOrganizer && (
+                    {perm.canMarkAttendance && (
                       <td className="row-actions">
                         <button
                           className="ghost-button"
@@ -1238,7 +1556,7 @@ export function MeetingDetailPage() {
             </div>
           </div>
 
-          {isOrganizer && (
+          {perm.canManageTasks && (
             <form className="form-grid four compact-form" onSubmit={createVote}>
               <label className="wide">
                 Nội dung cần biểu quyết *
@@ -1308,9 +1626,9 @@ export function MeetingDetailPage() {
             <EmptyState
               title="Chưa có nội dung biểu quyết"
               description={
-                isOrganizer
+                perm.canManageVotes
                   ? "Tạo biểu quyết ở trên, lưu nháp trước rồi mở lấy ý kiến đúng lúc cần."
-                  : "Chủ trì sẽ mở biểu quyết khi cần lấy ý kiến."
+                  : "Chủ tọa sẽ mở biểu quyết khi cần lấy ý kiến."
               }
             />
           ) : (
@@ -1320,8 +1638,8 @@ export function MeetingDetailPage() {
                   key={vote.id}
                   vote={vote}
                   result={voteResults[vote.id]}
-                  canManage={isOrganizer}
-                  canVote={isParticipant}
+                  canManage={perm.canManageVotes}
+                  canVote
                   participantCount={participants.length}
                   onOpen={openVote}
                   onClose={closeVote}
@@ -1345,15 +1663,16 @@ export function MeetingDetailPage() {
           </div>
           <MinutesPanel
             meetingId={id}
-            isOrganizer={isOrganizer}
+            isOrganizer={perm.canPublishMinutes}
             canSign={canSignMinutes}
+            canDraft={perm.canDraftMinutes}
             onNotice={setMessage}
             onError={setError}
           />
         </section>
       )}
 
-      {activeTab === "audit" && isOrganizer && (
+      {activeTab === "audit" && perm.canViewAuditLog && (
         <section className="panel">
           <div className="section-heading">
             <div>
@@ -1397,7 +1716,7 @@ export function MeetingDetailPage() {
           <div className="section-heading">
             <h2>Nhiệm vụ sau họp</h2>
           </div>
-          {isOrganizer && (
+          {perm.canManageTasks && (
             <form className="form-grid four compact-form" onSubmit={createTask}>
               <label>
                 Giao cho
@@ -1484,7 +1803,7 @@ export function MeetingDetailPage() {
                         <StatusPill value={task.status} />
                       </td>
                       <td className="row-actions">
-                        {(isOrganizer || task.assigned_to === user.id) && task.status !== "DONE" && (
+                        {(perm.canManageTasks || task.assigned_to === user.id) && task.status !== "DONE" && (
                           <button
                             className="secondary-button"
                             onClick={() => run(() => api.put(`/tasks/${task.id}/status`, { status: "DONE" }))}
@@ -1492,7 +1811,7 @@ export function MeetingDetailPage() {
                             Hoàn thành
                           </button>
                         )}
-                        {isOrganizer && (
+                        {perm.canManageTasks && (
                           <button className="icon-button danger" title="Xóa" onClick={() => run(() => api.delete(`/tasks/${task.id}`))}>
                             <Trash2 size={16} />
                           </button>

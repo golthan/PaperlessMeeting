@@ -15,6 +15,9 @@ const storage = multer.diskStorage({
 
 export const uploadDocument = multer({
   storage,
+  // Trình duyệt và app gửi tên file dạng UTF-8; mặc định multer đọc theo latin1 nên
+  // tên tiếng Việt bị hỏng (vd "300-câu" thành "300-cÃ¢u").
+  defParamCharset: "utf8",
   limits: {
     fileSize: env.maxFileSizeMb * 1024 * 1024
   },

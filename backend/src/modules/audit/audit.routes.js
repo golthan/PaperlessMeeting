@@ -4,7 +4,7 @@ import { authenticate } from "../../middlewares/auth.middleware.js";
 import { requireRole } from "../../middlewares/role.middleware.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { getPagination, paged } from "../../utils/pagination.js";
-import { assertMeetingOrganizer } from "../meetings/meetingAccess.js";
+import { assertMeetingLeadership } from "../meetings/meetingAccess.js";
 import { AUDIT_ACTION_LABELS, AUDIT_GROUPS } from "./audit.service.js";
 
 export const auditRouter = express.Router();
@@ -138,12 +138,12 @@ auditRouter.get(
   })
 );
 
-/** Nhật ký của một cuộc họp — chủ trì cuộc họp đó hoặc quản trị viên xem được. */
+/** Nhật ký của một cuộc họp — chủ tọa cuộc họp đó hoặc quản trị viên xem được. */
 meetingAuditRouter.get(
   "/",
   asyncHandler(async (req, res) => {
     if (req.user.role !== "ADMIN") {
-      await assertMeetingOrganizer(req.user, req.params.meetingId);
+      await assertMeetingLeadership(req.user, req.params.meetingId);
     }
     res.json(
       await queryLogs(req.query, [req.params.meetingId], ["al.meeting_id = $1"])

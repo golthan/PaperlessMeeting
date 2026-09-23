@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, SafeAreaView, StatusBar, StyleSheet, View } from "react-native";
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import {
@@ -12,14 +12,17 @@ import {
   LoginScreen,
   MeetingDetailScreen,
   MeetingsScreen,
+  ProfileScreen,
   TasksScreen
 } from "./src/screens";
+import { setSessionExpiredHandler } from "./src/api";
 import { NotificationsScreen, useNotificationCenter } from "./src/notifications";
+import { closeSharedSocket, useSocket } from "./src/realtime";
 import { ToastProvider, useToast } from "./src/toast";
 import { colors } from "./src/theme";
 import { BottomTabs, Header } from "./src/components";
 
-const TAB_SCREENS = ["dashboard", "meetings", "notifications", "tasks"];
+const TAB_SCREENS = ["dashboard", "meetings", "notifications", "tasks", "profile"];
 
 function AppShell() {
   const [booting, setBooting] = useState(true);
@@ -28,6 +31,8 @@ function AppShell() {
   const [screen, setScreen] = useState({ name: "dashboard" });
   const [refreshKey, setRefreshKey] = useState(0);
   const toast = useToast();
+  // Nhiều request lỗi cùng lúc chỉ được đăng xuất và báo một lần.
+  const expiredRef = useRef(false);
 
   useEffect(() => {
     getStoredSession()
@@ -52,12 +57,19 @@ function AppShell() {
           );
         }
         await saveSession(nextSession);
+        expiredRef.current = false;
         setToken(nextSession.token);
         setUser(nextSession.user);
         setScreen({ name: "dashboard" });
         toast.success("Đăng nhập thành công", nextSession.user.full_name);
       },
+      /** Lưu lại thông tin người dùng sau khi sửa hồ sơ. */
+      async updateUser(nextUser) {
+        await saveSession({ token, user: nextUser });
+        setUser(nextUser);
+      },
       async logout() {
+        closeSharedSocket();
         await clearSession();
         setToken(null);
         setUser(null);
@@ -72,7 +84,25 @@ function AppShell() {
     [token, user, toast]
   );
 
-  const notificationCenter = useNotificationCenter(auth);
+  // Một kết nối realtime dùng chung: thông báo cá nhân và mọi phòng họp đang mở.
+  const { socket, status: realtimeStatus } = useSocket(token);
+  const notificationCenter = useNotificationCenter(auth, socket);
+
+  // Tài khoản bị xoá / khoá / chưa được duyệt trong khi máy vẫn giữ token cũ:
+  // tự đăng xuất và nói rõ lý do thay vì kẹt ở màn hình lỗi.
+  useEffect(() => {
+    setSessionExpiredHandler(async (message) => {
+      if (expiredRef.current) return;
+      expiredRef.current = true;
+      closeSharedSocket();
+      await clearSession();
+      setToken(null);
+      setUser(null);
+      setScreen({ name: "dashboard" });
+      toast.warning("Phiên đăng nhập không còn hiệu lực", message);
+    });
+    return () => setSessionExpiredHandler(null);
+  }, [toast]);
 
   if (booting) {
     return <LoginScreen auth={auth} booting />;
@@ -90,6 +120,10 @@ function AppShell() {
     setScreen({ name: "meetingDetail", meetingId });
   }
 
+  function joinMeeting(meetingId) {
+    setScreen({ name: "liveMeeting", meetingId });
+  }
+
   return (
     <SafeAreaView style={styles.shell}>
       <ExpoStatusBar style="dark" />
@@ -97,13 +131,14 @@ function AppShell() {
       <Header
         title={
           showLive
-            ? "Phòng họp Live"
+            ? "Phòng họp trực tiếp"
             : showDetail
               ? "Chi tiết cuộc họp"
               : titleByScreen(screen.name)
         }
         subtitle={user.full_name || user.email}
         onLogout={auth.logout}
+        onOpenProfile={() => setScreen({ name: "profile" })}
         onBack={showNested ? () => setScreen({ name: "meetings" }) : null}
         onOpenNotifications={
           screen.name === "notifications"
@@ -117,7 +152,12 @@ function AppShell() {
           <DashboardScreen auth={auth} refreshKey={refreshKey} />
         )}
         {screen.name === "meetings" && (
-          <MeetingsScreen auth={auth} refreshKey={refreshKey} onOpenMeeting={openMeeting} />
+          <MeetingsScreen
+            auth={auth}
+            refreshKey={refreshKey}
+            onOpenMeeting={openMeeting}
+            onJoinMeeting={joinMeeting}
+          />
         )}
         {screen.name === "notifications" && (
           <NotificationsScreen
@@ -127,21 +167,26 @@ function AppShell() {
           />
         )}
         {screen.name === "tasks" && <TasksScreen auth={auth} refreshKey={refreshKey} />}
+        {screen.name === "profile" && <ProfileScreen auth={auth} />}
         {showDetail && (
           <MeetingDetailScreen
             auth={auth}
             meetingId={screen.meetingId}
+            socket={socket}
+            realtimeStatus={realtimeStatus}
             onBack={() => setScreen({ name: "meetings" })}
-            onOpenLive={() =>
-              setScreen({ name: "liveMeeting", meetingId: screen.meetingId })
-            }
+            onOpenLive={() => joinMeeting(screen.meetingId)}
           />
         )}
         {showLive && (
           <LiveMeetingScreen
             auth={auth}
             meetingId={screen.meetingId}
-            onBack={() => setScreen({ name: "meetingDetail", meetingId: screen.meetingId })}
+            socket={socket}
+            realtimeStatus={realtimeStatus}
+            onBack={() =>
+              setScreen({ name: "meetingDetail", meetingId: screen.meetingId })
+            }
           />
         )}
       </View>
@@ -168,6 +213,7 @@ function titleByScreen(name) {
   if (name === "meetings") return "Cuộc họp được mời";
   if (name === "tasks") return "Nhiệm vụ của tôi";
   if (name === "notifications") return "Thông báo";
+  if (name === "profile") return "Hồ sơ cá nhân";
   return "Dashboard";
 }
 

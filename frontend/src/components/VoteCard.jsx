@@ -1,13 +1,13 @@
 import { BarChart3, CheckCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { percent, voteOptions } from "../utils/meeting.js";
+import { percent, voteAnswerLabel, voteOptions } from "../utils/meeting.js";
 import { StatusPill } from "./StatusPill.jsx";
 
 /**
  * Thẻ biểu quyết dùng chung cho trang chi tiết cuộc họp và phòng họp.
  *
  * Khi phiên còn mở chỉ hiển thị tiến độ bỏ phiếu để tránh tâm lý theo số đông;
- * chốt xong mới hiện phân bố phiếu. Chủ trì có thể xem kết quả tạm tính.
+ * chốt xong mới hiện phân bố phiếu. Chủ tọa có thể xem kết quả tạm tính.
  */
 export function VoteCard({
   vote,
@@ -59,7 +59,7 @@ export function VoteCard({
               disabled={busy}
               onClick={() => onAnswer?.(vote, option)}
             >
-              {option}
+              {voteAnswerLabel(option)}
             </button>
           ))}
         </div>
@@ -67,18 +67,18 @@ export function VoteCard({
       {vote.my_answer && (
         <p className="vote-my-answer">
           <CheckCheck size={15} />
-          Bạn đã chọn: <strong>{vote.my_answer}</strong>
+          Bạn đã chọn: <strong>{voteAnswerLabel(vote.my_answer)}</strong>
         </p>
       )}
       {canVote && vote.status === "DRAFT" && (
-        <p className="muted small">Biểu quyết chưa mở, hãy chờ chủ trì.</p>
+        <p className="muted small">Biểu quyết chưa mở, hãy chờ chủ tọa.</p>
       )}
 
       {showResults && result?.results && (
         <div className="vote-results">
           {result.results.map((row) => (
             <div key={row.answer} className="vote-result-row">
-              <span>{row.answer}</span>
+              <span>{voteAnswerLabel(row.answer)}</span>
               <div className="vote-result-bar">
                 <span style={{ width: `${percent(row.count, voted || 1)}%` }} />
               </div>

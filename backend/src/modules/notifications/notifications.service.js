@@ -22,7 +22,10 @@ export const NOTIFICATION_TYPES = {
   VOTE_CLOSED: "VOTE_CLOSED",
   MINUTES_PUBLISHED: "MINUTES_PUBLISHED",
   TASK_ASSIGNED: "TASK_ASSIGNED",
-  TASK_UPDATED: "TASK_UPDATED"
+  TASK_UPDATED: "TASK_UPDATED",
+  ACCOUNT_REGISTERED: "ACCOUNT_REGISTERED",
+  ACCOUNT_APPROVED: "ACCOUNT_APPROVED",
+  ACCOUNT_REJECTED: "ACCOUNT_REJECTED"
 };
 
 /** Danh sách user_id của toàn bộ người tham dự một cuộc họp. */
@@ -87,4 +90,18 @@ export async function notifyMeetingAudience(meetingId, payload) {
     includeOrganizer: payload.includeOrganizer !== false
   });
   return notifyUsers(audience, { ...payload, meetingId });
+}
+
+/**
+ * Gửi thông báo cho mọi quản trị viên đang hoạt động.
+ * Dùng cho việc cần người quản trị xử lý, ví dụ có hồ sơ đăng ký mới chờ duyệt.
+ */
+export async function notifyAdmins(payload) {
+  const { rows } = await pool.query(
+    "SELECT id FROM users WHERE role = 'ADMIN' AND status = 'ACTIVE'"
+  );
+  return notifyUsers(
+    rows.map((row) => row.id),
+    payload
+  );
 }

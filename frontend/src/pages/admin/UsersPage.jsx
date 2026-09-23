@@ -1,4 +1,4 @@
-import { Lock, Plus, Save, Unlock } from "lucide-react";
+import { Check, Lock, Plus, Save, Unlock, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client.js";
 import { EmptyState } from "../../components/EmptyState.jsx";
@@ -21,6 +21,8 @@ export function UsersPage() {
   const [form, setForm] = useState(emptyForm);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  // Lựa chọn quyền / phòng ban mà admin đang cân nhắc cho từng hồ sơ chờ duyệt.
+  const [drafts, setDrafts] = useState({});
   const toast = useToast();
 
   async function load() {
@@ -91,6 +93,57 @@ export function UsersPage() {
     }
   }
 
+  // --- Duyệt hồ sơ đăng ký ---------------------------------------------------
+  // Người tự đăng ký nằm ở trạng thái PENDING, tách khỏi danh sách chính để
+  // quản trị viên nhìn thấy ngay việc cần xử lý.
+  const pendingUsers = useMemo(
+    () => items.filter((item) => item.status === "PENDING"),
+    [items]
+  );
+  const activeUsers = useMemo(
+    () => items.filter((item) => item.status !== "PENDING"),
+    [items]
+  );
+
+  function draftFor(item) {
+    return drafts[item.id] || { role: "PARTICIPANT", departmentId: "", note: "" };
+  }
+
+  function setDraft(item, patch) {
+    setDrafts((current) => ({
+      ...current,
+      [item.id]: { ...draftFor(item), ...patch }
+    }));
+  }
+
+  async function approveUser(item) {
+    setError("");
+    const draft = draftFor(item);
+    try {
+      await api.put(`/users/${item.id}/approve`, {
+        role: draft.role,
+        departmentId: draft.departmentId || null,
+        note: draft.note || null
+      });
+      await load();
+      toast.success("Đã duyệt tài khoản", `${item.email} · quyền ${draft.role}`);
+    } catch (err) {
+      setError(err.response?.data?.message || "Không duyệt được tài khoản");
+    }
+  }
+
+  async function rejectUser(item) {
+    setError("");
+    const draft = draftFor(item);
+    try {
+      await api.put(`/users/${item.id}/reject`, { note: draft.note || null });
+      await load();
+      toast.warning("Đã từ chối hồ sơ", item.email);
+    } catch (err) {
+      setError(err.response?.data?.message || "Không từ chối được hồ sơ");
+    }
+  }
+
   return (
     <div className="page-stack">
       <PageHeader
@@ -100,6 +153,99 @@ export function UsersPage() {
         backTo="/admin/dashboard"
         backLabel="Về Dashboard"
       />
+
+      <section className="panel">
+        <div className="section-heading row">
+          <div>
+            <span className="eyebrow">Hàng chờ xét duyệt</span>
+            <h2>Đăng ký chờ duyệt ({pendingUsers.length})</h2>
+          </div>
+        </div>
+        {pendingUsers.length === 0 ? (
+          <EmptyState
+            title="Không có hồ sơ nào chờ duyệt"
+            description="Khi có người đăng ký tài khoản mới, hồ sơ sẽ xuất hiện ở đây kèm thông báo."
+            icon={UserPlus}
+          />
+        ) : (
+          <div className="table-wrap">
+            <table className="pending-table">
+              <thead>
+                <tr>
+                  <th>Người đăng ký</th>
+                  <th>Liên hệ</th>
+                  <th>Cấp quyền</th>
+                  <th>Phòng ban</th>
+                  <th>Ghi chú xét duyệt</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingUsers.map((item) => {
+                  const draft = draftFor(item);
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        <strong>{item.full_name}</strong>
+                        <br />
+                        <small className="muted">{item.email}</small>
+                      </td>
+                      <td>
+                        {item.phone || "-"}
+                        <br />
+                        <small className="muted">{item.job_title || "Chưa khai báo"}</small>
+                      </td>
+                      <td>
+                        <select
+                          value={draft.role}
+                          onChange={(e) => setDraft(item, { role: e.target.value })}
+                        >
+                          <option value="PARTICIPANT">Người tham dự</option>
+                          <option value="ORGANIZER">Người tổ chức</option>
+                          <option value="ADMIN">Quản trị viên</option>
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={draft.departmentId}
+                          onChange={(e) => setDraft(item, { departmentId: e.target.value })}
+                        >
+                          <option value="">Chưa xếp phòng ban</option>
+                          {departmentOptions.map((dep) => (
+                            <option key={dep.value} value={dep.value}>
+                              {dep.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          value={draft.note}
+                          onChange={(e) => setDraft(item, { note: e.target.value })}
+                          placeholder="Lý do / ghi chú (tuỳ chọn)"
+                        />
+                      </td>
+                      <td className="row-actions">
+                        <button
+                          className="primary-button"
+                          onClick={() => approveUser(item)}
+                        >
+                          <Check size={16} />
+                          Duyệt
+                        </button>
+                        <button className="danger-button" onClick={() => rejectUser(item)}>
+                          <X size={16} />
+                          Từ chối
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="panel">
         <div className="section-heading">
@@ -176,7 +322,7 @@ export function UsersPage() {
             </button>
           </div>
         </div>
-        {items.length === 0 ? (
+        {activeUsers.length === 0 ? (
           <EmptyState />
         ) : (
           <div className="table-wrap">
@@ -192,7 +338,7 @@ export function UsersPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {activeUsers.map((item) => (
                   <tr key={item.id}>
                     <td>{item.full_name}</td>
                     <td>{item.email}</td>

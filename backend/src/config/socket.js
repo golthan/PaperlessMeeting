@@ -3,6 +3,7 @@ import { pool } from "./db.js";
 import { env } from "./env.js";
 import { verifyToken } from "../utils/jwt.js";
 import { autoCheckInOnJoin } from "../modules/attendance/attendance.service.js";
+import { getMeetingRole } from "../modules/meetings/meetingAccess.js";
 
 let ioInstance = null;
 
@@ -202,13 +203,10 @@ export function initSocket(httpServer) {
       try {
         const meeting = await canAccessMeeting(socket.user, meetingId);
         if (!meeting) throw new Error("Cannot update notes");
-        const participant = await pool.query(
-          `SELECT role_in_meeting FROM meeting_participants WHERE meeting_id = $1 AND user_id = $2`,
-          [meetingId, socket.user.id]
-        );
-        const isSecretary = participant.rows[0]?.role_in_meeting === "SECRETARY";
-        const isOrganizer = meeting.organizer_id === socket.user.id;
-        if (!isOrganizer && !isSecretary) throw new Error("Only organizer or secretary can update public notes");
+        const role = await getMeetingRole(socket.user, meeting);
+        if (!["CHAIRMAN", "SECRETARY"].includes(role)) {
+          throw new Error("Chỉ chủ tọa hoặc thư ký được sửa ghi chú chung");
+        }
 
         const { rows } = await pool.query(
           `INSERT INTO meeting_notes (meeting_id, content, updated_by, updated_at)
@@ -312,17 +310,22 @@ async function updateHand(socket, meetingId, isRaised, callback) {
   try {
     const meeting = await canAccessMeeting(socket.user, meetingId);
     if (!meeting) throw new Error("Cannot update hand status");
-    await pool.query(
+    // Ghi mốc giơ tay để chủ tọa mời theo đúng thứ tự chờ.
+    const { rows } = await pool.query(
       `UPDATE meeting_participants
-       SET is_hand_raised = $1, updated_at = now()
-       WHERE meeting_id = $2 AND user_id = $3`,
+       SET is_hand_raised = $1,
+           hand_raised_at = CASE WHEN $1 THEN now() ELSE NULL END,
+           updated_at = now()
+       WHERE meeting_id = $2 AND user_id = $3
+       RETURNING hand_raised_at`,
       [isRaised, meetingId, socket.user.id]
     );
     const payload = {
       meetingId,
       userId: socket.user.id,
       fullName: socket.user.full_name,
-      isHandRaised: isRaised
+      isHandRaised: isRaised,
+      handRaisedAt: rows[0]?.hand_raised_at || null
     };
     getIO()?.of("/meeting").to(roomName(meetingId)).emit("hand_status_updated", payload);
     callback?.({ ok: true, data: payload });

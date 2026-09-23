@@ -42,7 +42,7 @@ const tones = {
 /** Nhãn tiếng Việt mặc định cho từng giá trị trạng thái. */
 const labels = {
   ADMIN: "Quản trị",
-  ORGANIZER: "Chủ trì",
+  ORGANIZER: "Người tổ chức",
   PARTICIPANT: "Người dự",
   ACTIVE: "Đang hoạt động",
   LOCKED: "Đã khoá",
@@ -73,7 +73,7 @@ const labels = {
   OFFLINE: "Tập trung",
   HYBRID: "Tập trung + trực tuyến",
   HAND: "Giơ tay",
-  CHAIRMAN: "Chủ trì",
+  CHAIRMAN: "Chủ tọa",
   SECRETARY: "Thư ký",
   MEMBER: "Thành viên",
   LOW: "Thấp",
@@ -85,6 +85,7 @@ const labels = {
 const contextLabels = {
   invitation: { PENDING: "Chờ phản hồi" },
   document: { PENDING: "Chờ duyệt" },
+  account: { PENDING: "Chờ quản trị duyệt", REJECTED: "Đã bị từ chối" },
   agenda: { PENDING: "Chưa trình bày", DONE: "Đã xong" },
   vote: { DRAFT: "Nháp", OPEN: "Đang lấy ý kiến", CLOSED: "Đã chốt" },
   presence: { ONLINE: "Trong phòng" }

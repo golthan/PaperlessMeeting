@@ -28,6 +28,14 @@ function previewKind(document) {
   return "download";
 }
 
+/** Dựng lại file từ chuỗi base64 do máy chủ trả về. */
+function base64ToBlob(base64, type) {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
+
 /** Tải file kèm token rồi lưu về máy (không lộ link tĩnh, không cần header ở thẻ a). */
 async function downloadDocument(item) {
   try {
@@ -121,7 +129,9 @@ export function DocumentWorkspace({
     setNoteDirty(false);
   }, [selected?.id, selectedNote?.updated_at]);
 
-  // Tải nội dung tài liệu kèm token rồi hiển thị bằng blob URL.
+  // Lấy nội dung tài liệu dạng JSON rồi dựng lại file và hiển thị bằng blob URL.
+  // Không tải file PDF trực tiếp: trình quản lý tải xuống (IDM...) sẽ chặn phản hồi đó
+  // và bật hộp thoại tải về thay vì cho xem ngay trên trang.
   useEffect(() => {
     let revoked = false;
     let objectUrl = "";
@@ -131,11 +141,12 @@ export function DocumentWorkspace({
     if (!selected || previewKind(selected) === "download") return undefined;
 
     api
-      .get(`/documents/${selected.id}/preview`, { responseType: "blob" })
+      .get(`/documents/${selected.id}/content`)
       .then((res) => {
         if (revoked) return;
+        const { base64, mimeType } = res.data.data;
         objectUrl = URL.createObjectURL(
-          new Blob([res.data], { type: selected.mime_type || "application/octet-stream" })
+          base64ToBlob(base64, mimeType || selected.mime_type || "application/octet-stream")
         );
         setPreviewUrl(objectUrl);
       })
@@ -284,7 +295,7 @@ export function DocumentWorkspace({
             <p className="muted small">
               {canManage
                 ? "Tài liệu bạn đăng được duyệt ngay và hiện cho cả phòng họp."
-                : "Tài liệu bạn gửi sẽ chờ chủ trì duyệt trước khi mọi người xem được."}
+                : "Tài liệu bạn gửi sẽ chờ chủ tọa duyệt trước khi mọi người xem được."}
             </p>
           </form>
         )}
@@ -457,7 +468,7 @@ export function DocumentWorkspace({
                       Chưa có tóm tắt cho tài liệu này.
                       {canSummarize
                         ? " Bấm Tóm tắt tài liệu để AI đọc và rút gọn nội dung chính."
-                        : " Chủ trì hoặc thư ký sẽ tạo tóm tắt."}
+                        : " Chủ tọa hoặc thư ký sẽ tạo tóm tắt."}
                     </p>
                   )}
 
@@ -580,7 +591,7 @@ export function DocumentWorkspace({
               placeholder={
                 canEditNotes
                   ? "Ghi chú chung về tài liệu: kết luận, điểm cần sửa, phân công..."
-                  : "Chỉ chủ trì và thư ký được ghi vào đây."
+                  : "Chỉ chủ tọa và thư ký được ghi vào đây."
               }
             />
             <div className="doc-notes-foot">

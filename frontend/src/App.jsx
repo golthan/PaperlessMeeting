@@ -15,6 +15,7 @@ import { MyTasksPage } from "./pages/participant/MyTasksPage.jsx";
 import { NotificationsPage } from "./pages/NotificationsPage.jsx";
 import { AuditLogPage } from "./pages/admin/AuditLogPage.jsx";
 import { VerifyMinutesPage } from "./pages/VerifyMinutesPage.jsx";
+import { ProfilePage } from "./pages/ProfilePage.jsx";
 
 function ProtectedRoute({ roles, children }) {
   const { user, booting } = useAuth();
@@ -50,6 +51,16 @@ export function App() {
           </ProtectedRoute>
         }
       >
+        {/* Hồ sơ cá nhân: vai trò nào đăng nhập cũng vào được. */}
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute>
+              <ProfilePage />
+            </ProtectedRoute>
+          }
+        />
+
         <Route
           path="/admin/notifications"
           element={

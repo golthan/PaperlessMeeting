@@ -69,7 +69,10 @@ const toneMap = {
   HYBRID: "info",
   CURRENT: "info",
   SECRETARY: "info",
-  MEMBER: "neutral"
+  MEMBER: "neutral",
+  ADMIN: "danger",
+  ORGANIZER: "info",
+  PARTICIPANT: "neutral"
 };
 
 /** Nhãn tiếng Việt cho từng trạng thái để người dùng không phải đọc mã enum. */
@@ -100,12 +103,15 @@ const labelMap = {
   ONLINE: "Trực tuyến",
   OFFLINE: "Tập trung",
   HYBRID: "Tập trung + trực tuyến",
-  CHAIRMAN: "Chủ trì",
+  CHAIRMAN: "Chủ tọa",
   SECRETARY: "Thư ký",
   MEMBER: "Thành viên",
   HIGH: "Ưu tiên cao",
   MEDIUM: "Ưu tiên vừa",
-  LOW: "Ưu tiên thấp"
+  LOW: "Ưu tiên thấp",
+  ADMIN: "Quản trị viên",
+  ORGANIZER: "Người tổ chức",
+  PARTICIPANT: "Người tham dự"
 };
 
 function initials(value) {
@@ -124,6 +130,7 @@ export function Header({
   onLogout,
   onBack,
   onOpenNotifications,
+  onOpenProfile,
   unreadCount = 0
 }) {
   return (
@@ -132,9 +139,18 @@ export function Header({
         {onBack ? (
           <IconButton icon="chevron-back" label="Quay lại" onPress={onBack} />
         ) : (
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials(subtitle)}</Text>
-          </View>
+          // Chạm vào avatar là mở hồ sơ cá nhân.
+          <Pressable
+            onPress={onOpenProfile}
+            disabled={!onOpenProfile}
+            accessibilityRole="button"
+            accessibilityLabel="Hồ sơ cá nhân"
+            hitSlop={6}
+          >
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initials(subtitle)}</Text>
+            </View>
+          </Pressable>
         )}
         <View style={styles.headerText}>
           <Text style={styles.headerTitle} numberOfLines={1}>
@@ -223,7 +239,8 @@ const TAB_ITEMS = [
   ["dashboard", "Tổng quan", "grid", "grid-outline"],
   ["meetings", "Cuộc họp", "calendar", "calendar-outline"],
   ["notifications", "Thông báo", "notifications", "notifications-outline"],
-  ["tasks", "Nhiệm vụ", "checkbox", "checkbox-outline"]
+  ["tasks", "Nhiệm vụ", "checkbox", "checkbox-outline"],
+  ["profile", "Hồ sơ", "person-circle", "person-circle-outline"]
 ];
 
 function TabButton({ name, label, iconActive, icon, isActive, badge, onPress }) {

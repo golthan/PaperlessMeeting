@@ -11,7 +11,7 @@ import {
 } from "../../utils/validators.js";
 import {
   assertMeetingAccess,
-  assertMeetingOrganizer,
+  assertMeetingChairman,
   assertParticipantAccess
 } from "../meetings/meetingAccess.js";
 import { emitMeetingEvent } from "../../config/socket.js";
@@ -139,14 +139,13 @@ meetingVotesRouter.get(
 );
 
 /**
- * Tạo biểu quyết. Mặc định lưu ở trạng thái nháp để chủ trì rà soát trước;
+ * Tạo biểu quyết. Mặc định lưu ở trạng thái nháp để chủ tọa rà soát trước;
  * truyền openNow = true nếu muốn mở lấy ý kiến ngay và bắn thông báo.
  */
 meetingVotesRouter.post(
   "/",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.meetingId);
+    await assertMeetingChairman(req.user, req.params.meetingId);
     requireFields(req.body, ["title"]);
     const type = req.body.type || "YES_NO_ABSTAIN";
     assertEnum(type, VOTE_TYPES, "vote type");
@@ -200,10 +199,9 @@ meetingVotesRouter.post(
 
 votesRouter.put(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const vote = await getVote(req.params.id);
-    await assertMeetingOrganizer(req.user, vote.meeting_id);
+    await assertMeetingChairman(req.user, vote.meeting_id);
     if (vote.status === "CLOSED") throw badRequest("Biểu quyết đã đóng nên không sửa được");
 
     const type = req.body.type || vote.type;
@@ -235,10 +233,9 @@ votesRouter.put(
 
 votesRouter.put(
   "/:id/open",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const vote = await getVote(req.params.id);
-    await assertMeetingOrganizer(req.user, vote.meeting_id);
+    await assertMeetingChairman(req.user, vote.meeting_id);
     if (vote.status === "OPEN") throw badRequest("Biểu quyết đang mở");
 
     const { rows } = await pool.query(
@@ -274,10 +271,9 @@ votesRouter.put(
 
 votesRouter.put(
   "/:id/close",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const vote = await getVote(req.params.id);
-    await assertMeetingOrganizer(req.user, vote.meeting_id);
+    await assertMeetingChairman(req.user, vote.meeting_id);
     if (vote.status !== "OPEN") throw badRequest("Chỉ đóng được biểu quyết đang mở");
 
     const { rows } = await pool.query(
@@ -320,10 +316,9 @@ votesRouter.put(
 
 votesRouter.delete(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const vote = await getVote(req.params.id);
-    await assertMeetingOrganizer(req.user, vote.meeting_id);
+    await assertMeetingChairman(req.user, vote.meeting_id);
     if (vote.status !== "DRAFT") {
       throw badRequest("Chỉ xoá được biểu quyết còn ở trạng thái nháp");
     }

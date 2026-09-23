@@ -84,6 +84,32 @@ function buildDocumentBlock(document, { withCitations = false } = {}) {
  * dự phòng trong cùng lời gọi. Nếu tài khoản chưa bật beta này thì API trả 400,
  * lúc đó thử lại một lần không kèm tham số dự phòng để tính năng vẫn chạy.
  */
+/**
+ * Đổi lỗi thô của SDK thành thông báo người dùng hiểu được.
+ *
+ * Không làm việc này thì khoá sai sẽ đẩy nguyên khối JSON của Anthropic ra
+ * giao diện, người dùng không biết phải sửa ở đâu.
+ */
+function friendlyAiError(error) {
+  const status = error?.status;
+  if (status === 401 || status === 403) {
+    return badRequest(
+      "ANTHROPIC_API_KEY không hợp lệ. Kiểm tra lại khoá trong backend/.env " +
+        "(khoá thật có dạng sk-ant-api03-...) rồi khởi động lại backend."
+    );
+  }
+  if (status === 429) {
+    return badRequest("Đã chạm giới hạn gọi API của Anthropic, thử lại sau ít phút");
+  }
+  if (status === 402) {
+    return badRequest("Tài khoản Anthropic hết hạn mức, cần nạp thêm để dùng tính năng AI");
+  }
+  if (error instanceof Anthropic.APIConnectionError) {
+    return badRequest("Không kết nối được tới Anthropic, kiểm tra đường truyền mạng");
+  }
+  return error;
+}
+
 async function callClaude(params) {
   const client = getClient();
   try {
@@ -97,8 +123,13 @@ async function callClaude(params) {
     const isFallbackIssue =
       error instanceof Anthropic.BadRequestError &&
       /fallback|beta/i.test(message);
-    if (!isFallbackIssue) throw error;
-    return client.messages.create(params);
+    if (!isFallbackIssue) throw friendlyAiError(error);
+
+    try {
+      return await client.messages.create(params);
+    } catch (retryError) {
+      throw friendlyAiError(retryError);
+    }
   }
 }
 
@@ -148,6 +179,26 @@ Yêu cầu:
 - Nếu tài liệu có nội dung cần biểu quyết hoặc cần xin ý kiến, nêu rõ ở cuối.
 - Chỉ dùng thông tin có trong tài liệu, không suy diễn thêm.`;
 
+const DISCUSSION_SYSTEM = `Bạn là thư ký cuộc họp của một cơ quan nhà nước Việt Nam.
+Nhiệm vụ: đọc toàn bộ trao đổi trong phòng họp và dựng phần "Diễn biến và ý kiến thảo luận"
+của biên bản.
+Yêu cầu:
+- Viết bằng tiếng Việt, văn phong hành chính, xưng hô trung lập (không dùng "tôi", "bạn").
+- Gom ý kiến theo CHỦ ĐỀ, không thuật lại từng tin nhắn theo thứ tự thời gian.
+- Trình bày đúng bốn mục sau, mỗi mục là một đề mục in đậm:
+  **Các nội dung đã trao đổi** - mỗi chủ đề một gạch đầu dòng, nêu rõ ai nêu ý kiến gì.
+  **Điểm đã thống nhất** - những việc mọi người đồng thuận.
+  **Điểm còn ý kiến khác nhau** - nêu các luồng ý kiến trái chiều và người đại diện từng luồng.
+  **Việc cần làm tiếp** - đề xuất nhiệm vụ hoặc nội dung cần quyết định, nếu có.
+- Mục nào không có dữ liệu thì ghi "Không có".
+- CHỈ dùng thông tin có trong trao đổi. Tuyệt đối không suy diễn, không thêm kết luận
+  mà không ai nói ra, không bịa số liệu.
+- Nêu đúng tên người phát biểu như trong bản ghi.
+- Dòng có nhãn [nói] là chữ do máy nhận dạng giọng nói, có thể sai tên riêng, số
+  liệu hoặc thiếu dấu. Khi một nội dung vừa xuất hiện ở dòng [nói] vừa ở dòng
+  [chat] thì tin theo dòng [chat]. Chỗ nào nghe không rõ nghĩa thì bỏ qua, tuyệt
+  đối không đoán thành số liệu hay kết luận.`;
+
 const ASK_SYSTEM = `Bạn là trợ lý tra cứu tài liệu trong phòng họp.
 Trả lời câu hỏi của đại biểu chỉ dựa trên nội dung tài liệu được cung cấp.
 Yêu cầu:
@@ -171,6 +222,95 @@ export async function summarizeDocument(document) {
           {
             type: "text",
             text: `Tóm tắt tài liệu "${document.display_name}" phục vụ cuộc họp.`
+          }
+        ]
+      }
+    ]
+  });
+
+  assertNotRefused(response);
+  return { summary: extractText(response), model: response.model };
+}
+
+/**
+ * Tổng hợp thảo luận trong phòng họp thành phần "Diễn biến và ý kiến" của biên bản.
+ *
+ * Đây là phần duy nhất của biên bản mà bộ tự sinh không lắp ráp được: ý kiến nằm
+ * rải rác trong chat dạng văn xuôi, không có cấu trúc để đếm hay xếp bảng.
+ * Kết quả luôn là BẢN NHÁP — thư ký đọc lại rồi mới đưa vào biên bản, vì biên bản
+ * có ký số và giá trị pháp lý.
+ */
+function clockLabel(value) {
+  if (!value) return "";
+  return new Date(value).toLocaleTimeString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+/**
+ * Tổng hợp diễn biến thảo luận từ HAI nguồn: lời nói và chat.
+ *
+ * Trong một cuộc họp, ý kiến vừa được nói ra vừa được gõ vào chat. Trộn cả hai
+ * theo thứ tự thời gian rồi đưa cho mô hình một dòng thời gian duy nhất, thay vì
+ * tóm tắt riêng hai bản rồi ghép — làm vậy thì cùng một ý bị kể hai lần và
+ * không thấy được ai đáp lại ai.
+ *
+ * Mỗi dòng có nhãn [nói] hoặc [chat] để mô hình biết dòng nào là chữ máy nghe
+ * (có thể sai) và dòng nào là chữ người tự gõ.
+ */
+export async function summarizeDiscussion({
+  meeting,
+  agenda = [],
+  messages = [],
+  speech = []
+}) {
+  const timeline = [
+    ...messages.map((item) => ({
+      at: item.created_at,
+      kind: "chat",
+      who: item.sender_name || item.sender_email,
+      text: item.content
+    })),
+    ...speech.map((item) => ({
+      at: item.spoken_at,
+      kind: "nói",
+      who: item.speaker_name,
+      text: item.content
+    }))
+  ]
+    .sort((a, b) => new Date(a.at) - new Date(b.at))
+    .map((item) => `[${clockLabel(item.at)}] [${item.kind}] ${item.who}: ${item.text}`)
+    .join("\n");
+
+  // Chương trình nghị sự giúp mô hình gom ý kiến đúng theo từng nội dung đã định.
+  const agendaBlock = agenda.length
+    ? `Chương trình nghị sự:\n${agenda
+        .map((item, index) => `${index + 1}. ${item.title}`)
+        .join("\n")}\n\n`
+    : "";
+
+  const response = await callClaude({
+    model: env.aiModel,
+    max_tokens: 16000,
+    system: DISCUSSION_SYSTEM,
+    // Gom ý kiến trái chiều cần suy luận kỹ hơn tóm tắt tài liệu.
+    output_config: { effort: "medium" },
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              `Cuộc họp: "${meeting.title}"\n` +
+              (meeting.description ? `Nội dung chính: ${meeting.description}\n` : "") +
+              "\n" +
+              agendaBlock +
+              "Diễn biến trong phòng họp, xếp theo thời gian " +
+              `(${speech.length} lượt phát biểu được ghi âm chuyển chữ, ` +
+              `${messages.length} tin nhắn gõ tay):\n` +
+              timeline
           }
         ]
       }

@@ -16,8 +16,10 @@ import {
 import { resolveUploadPath } from "../../utils/file.js";
 import {
   assertMeetingAccess,
-  assertMeetingOrganizer,
-  assertParticipantAccess
+  assertMeetingChairman,
+  assertParticipantAccess,
+  canSeeFullMeetingRecord,
+  getMeetingRole
 } from "../meetings/meetingAccess.js";
 import { emitMeetingEvent, emitToUsers } from "../../config/socket.js";
 import {
@@ -54,10 +56,13 @@ async function getDocument(documentId) {
 }
 
 async function assertDocumentAccess(user, document) {
-  await assertMeetingAccess(user, document.meeting_id);
-  if (user.role === "PARTICIPANT" && document.status !== "APPROVED") {
-    throw forbidden("Document is not approved");
-  }
+  const meeting = await assertMeetingAccess(user, document.meeting_id);
+  if (document.status === "APPROVED") return;
+  // Người gửi luôn mở được tài liệu của chính mình để theo dõi (kể cả khi chờ duyệt / bị từ chối).
+  if (document.uploaded_by === user.id) return;
+  // Chủ tọa / thư ký phải đọc được tài liệu chờ duyệt thì mới duyệt được.
+  if (await canSeeFullMeetingRecord(user, meeting)) return;
+  throw forbidden("Tài liệu chưa được duyệt");
 }
 
 meetingDocumentsRouter.use(authenticate);
@@ -66,8 +71,8 @@ documentsRouter.use(authenticate);
 meetingDocumentsRouter.get(
   "/",
   asyncHandler(async (req, res) => {
-    await assertMeetingAccess(req.user, req.params.meetingId);
-    const participantFilter = req.user.role === "PARTICIPANT";
+    const meeting = await assertMeetingAccess(req.user, req.params.meetingId);
+    const limitedView = !(await canSeeFullMeetingRecord(req.user, meeting));
 
     const { rows } = await pool.query(
       `SELECT doc.*, u.full_name AS uploaded_by_name
@@ -75,9 +80,9 @@ meetingDocumentsRouter.get(
        JOIN users u ON u.id = doc.uploaded_by
        WHERE doc.meeting_id = $1
          AND doc.deleted_at IS NULL
-         AND ($2::boolean = false OR doc.status = 'APPROVED')
+         AND ($2::boolean = false OR doc.status = 'APPROVED' OR doc.uploaded_by = $3)
        ORDER BY doc.created_at DESC`,
-      [req.params.meetingId, participantFilter]
+      [req.params.meetingId, limitedView, req.user.id]
     );
     res.json({ data: rows });
   })
@@ -102,11 +107,12 @@ meetingDocumentsRouter.post(
     let status = "PENDING";
     let meeting = null;
     try {
-      if (req.user.role === "ORGANIZER") {
-        meeting = await assertMeetingOrganizer(req.user, req.params.meetingId);
+      // Chủ tọa và thư ký đăng thẳng; thành viên gửi lên chờ chủ tọa duyệt.
+      meeting = await assertParticipantAccess(req.user, req.params.meetingId);
+      const role = await getMeetingRole(req.user, meeting);
+      if (["CHAIRMAN", "SECRETARY"].includes(role)) {
         status = "APPROVED";
-      } else if (req.user.role === "PARTICIPANT") {
-        meeting = await assertParticipantAccess(req.user, req.params.meetingId);
+      } else {
         const permission = await pool.query(
           `SELECT can_upload_document
            FROM meeting_participants
@@ -116,8 +122,6 @@ meetingDocumentsRouter.post(
         if (!permission.rows[0]?.can_upload_document) {
           throw forbidden("Bạn không được cấp quyền gửi tài liệu trong cuộc họp này");
         }
-      } else {
-        throw forbidden("Chỉ chủ trì hoặc người tham dự mới gửi được tài liệu");
       }
 
       // Hồ sơ cuộc họp đóng lại sau khi kết thúc hoặc bị huỷ.
@@ -153,7 +157,7 @@ meetingDocumentsRouter.post(
     );
 
     const document = { ...rows[0], uploaded_by_name: req.user.full_name };
-    // Tài liệu đã duyệt hiện cho cả phòng; tài liệu chờ duyệt chỉ chủ trì và người gửi thấy.
+    // Tài liệu đã duyệt hiện cho cả phòng; tài liệu chờ duyệt chỉ chủ tọa và người gửi thấy.
     if (status === "APPROVED") {
       emitMeetingEvent(req.params.meetingId, "document_added", document);
     } else {
@@ -217,10 +221,9 @@ documentsRouter.get(
 
 documentsRouter.put(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const document = await getDocument(req.params.id);
-    await assertMeetingOrganizer(req.user, document.meeting_id);
+    await assertMeetingChairman(req.user, document.meeting_id);
     assertEnum(req.body.status, DOCUMENT_STATUSES, "document status");
 
     const { rows } = await pool.query(
@@ -245,10 +248,9 @@ documentsRouter.put(
 
 documentsRouter.delete(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const document = await getDocument(req.params.id);
-    await assertMeetingOrganizer(req.user, document.meeting_id);
+    await assertMeetingChairman(req.user, document.meeting_id);
 
     await pool.query(
       "UPDATE documents SET deleted_at = now(), updated_at = now() WHERE id = $1",
@@ -268,10 +270,9 @@ documentsRouter.delete(
 
 documentsRouter.put(
   "/:id/approve",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const document = await getDocument(req.params.id);
-    await assertMeetingOrganizer(req.user, document.meeting_id);
+    await assertMeetingChairman(req.user, document.meeting_id);
     const { rows } = await pool.query(
       `UPDATE documents SET status = 'APPROVED', updated_at = now()
        WHERE id = $1
@@ -314,10 +315,9 @@ documentsRouter.put(
 
 documentsRouter.put(
   "/:id/reject",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const document = await getDocument(req.params.id);
-    await assertMeetingOrganizer(req.user, document.meeting_id);
+    await assertMeetingChairman(req.user, document.meeting_id);
     const { rows } = await pool.query(
       `UPDATE documents SET status = 'REJECTED', updated_at = now()
        WHERE id = $1
@@ -325,7 +325,7 @@ documentsRouter.put(
       [req.params.id]
     );
 
-    // Tài liệu bị từ chối không hiện cho cả phòng, chỉ chủ trì và người gửi biết.
+    // Tài liệu bị từ chối không hiện cho cả phòng, chỉ chủ tọa và người gửi biết.
     emitToUsers([document.organizer_id, document.uploaded_by], "document_updated", rows[0]);
     await writeAuditLog(req, {
       action: AUDIT_ACTIONS.DOCUMENT_REJECT,
@@ -352,10 +352,9 @@ documentsRouter.put(
 
 documentsRouter.put(
   "/:id/present",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const document = await getDocument(req.params.id);
-    await assertMeetingOrganizer(req.user, document.meeting_id);
+    await assertMeetingChairman(req.user, document.meeting_id);
 
     const { rows } = await pool.query(
       `WITH cleared AS (
@@ -386,10 +385,9 @@ documentsRouter.put(
 
 documentsRouter.put(
   "/:id/page",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const document = await getDocument(req.params.id);
-    await assertMeetingOrganizer(req.user, document.meeting_id);
+    await assertMeetingChairman(req.user, document.meeting_id);
     const currentPage = Math.max(Number(req.body.currentPage || 1), 1);
 
     const { rows } = await pool.query(
@@ -430,6 +428,42 @@ documentsRouter.get(
     });
 
     res.sendFile(resolveUploadPath(document.file_path));
+  })
+);
+
+/**
+ * Nội dung tài liệu dạng JSON (base64) để trình duyệt tự dựng lại file và xem trước.
+ *
+ * Không trả thẳng file nhị phân như /preview vì các trình quản lý tải xuống phổ biến
+ * (Internet Download Manager...) chặn mọi phản hồi application/pdf của trình duyệt ở
+ * tầng mạng, bật hộp thoại tải về và trả cho trang một phản hồi 204 rỗng không có
+ * header CORS — khiến ô xem trước luôn báo lỗi. Phản hồi JSON không bị chặn.
+ */
+documentsRouter.get(
+  "/:id/content",
+  asyncHandler(async (req, res) => {
+    const document = await getDocument(req.params.id);
+    await assertDocumentAccess(req.user, document);
+
+    const buffer = await fs.promises.readFile(resolveUploadPath(document.file_path));
+    await writeAuditLog(req, {
+      action: AUDIT_ACTIONS.DOCUMENT_VIEW,
+      entityType: "DOCUMENT",
+      entityId: document.id,
+      meetingId: document.meeting_id,
+      description: `Xem tài liệu "${document.display_name}"`
+    });
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      data: {
+        id: document.id,
+        name: document.original_name,
+        mimeType: document.mime_type || "application/octet-stream",
+        size: buffer.length,
+        base64: buffer.toString("base64")
+      }
+    });
   })
 );
 
@@ -481,7 +515,7 @@ documentsRouter.put(
 
 /**
  * Tóm tắt tài liệu bằng AI.
- * Chỉ chủ trì và thư ký được bấm tóm tắt (vừa là khâu kiểm duyệt nội dung,
+ * Chỉ chủ tọa và thư ký được bấm tóm tắt (vừa là khâu kiểm duyệt nội dung,
  * vừa tránh nhiều người cùng gọi API tốn chi phí); kết quả lưu vào tài liệu
  * nên cả phòng họp đều đọc được.
  */

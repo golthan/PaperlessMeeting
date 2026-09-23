@@ -1,7 +1,7 @@
 import { pool } from "../../config/db.js";
 
 /**
- * Điểm danh dùng chung cho REST API (tự điểm danh, QR, organizer chỉnh tay)
+ * Điểm danh dùng chung cho REST API (tự điểm danh, organizer chỉnh tay)
  * và cho socket (vào phòng họp coi như đã có mặt).
  * Module này cố tình không import config/socket.js để tránh vòng lặp import:
  * nơi gọi tự chịu trách nhiệm phát sự kiện realtime.
@@ -58,7 +58,7 @@ export async function markAttendance({ meetingId, userId, status, method }) {
 
 /**
  * Vào phòng họp khi cuộc họp đang diễn ra thì tự điểm danh.
- * Không ghi đè trạng thái đã có (QR, tự điểm danh, organizer đã chỉnh tay).
+ * Không ghi đè trạng thái đã có (tự điểm danh, organizer đã chỉnh tay).
  */
 export async function autoCheckInOnJoin(meeting, userId) {
   if (!meeting || meeting.status !== "ONGOING") return null;

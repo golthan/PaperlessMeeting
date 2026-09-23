@@ -8,7 +8,10 @@ import { badRequest, forbidden, notFound } from "../../utils/httpError.js";
 import { requireFields } from "../../utils/validators.js";
 import {
   assertMeetingAccess,
-  assertMeetingOrganizer
+  assertMeetingChairman,
+  assertMeetingLeadership,
+  canSeeFullMeetingRecord,
+  getMeetingRole
 } from "../meetings/meetingAccess.js";
 import {
   NOTIFICATION_TYPES,
@@ -49,18 +52,17 @@ function verificationUrl(code) {
 }
 
 /**
- * Ai được ký: chủ trì cuộc họp ký với chức danh "Chủ trì",
+ * Ai được ký: chủ tọa cuộc họp ký với chức danh "Chủ tọa",
  * thư ký của cuộc họp ký với chức danh "Thư ký".
  */
 async function resolveSignerTitle(user, minutes) {
-  if (minutes.organizer_id === user.id) return "Chủ trì";
-  const { rows } = await pool.query(
-    `SELECT role_in_meeting FROM meeting_participants
-     WHERE meeting_id = $1 AND user_id = $2`,
-    [minutes.meeting_id, user.id]
-  );
-  if (rows[0]?.role_in_meeting === "SECRETARY") return "Thư ký";
-  throw forbidden("Chỉ chủ trì hoặc thư ký của cuộc họp được ký biên bản");
+  const role = await getMeetingRole(user, {
+    id: minutes.meeting_id,
+    organizer_id: minutes.organizer_id
+  });
+  if (role === "CHAIRMAN") return "Chủ tọa";
+  if (role === "SECRETARY") return "Thư ký";
+  throw forbidden("Chỉ chủ tọa hoặc thư ký của cuộc họp được ký biên bản");
 }
 
 /** Đã có chữ ký thì nội dung bị khoá, phải gỡ chữ ký mới sửa được. */
@@ -82,14 +84,15 @@ minutesRouter.use(authenticate);
 meetingMinutesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
-    await assertMeetingAccess(req.user, req.params.meetingId);
-    const participantOnly = req.user.role === "PARTICIPANT";
+    const meeting = await assertMeetingAccess(req.user, req.params.meetingId);
+    // Thư ký soạn bản nháp thì phải mở lại được bản nháp đó.
+    const limitedView = !(await canSeeFullMeetingRecord(req.user, meeting));
     const { rows } = await pool.query(
       `SELECT *
        FROM minutes
        WHERE meeting_id = $1
          AND ($2::boolean = false OR status = 'PUBLISHED')`,
-      [req.params.meetingId, participantOnly]
+      [req.params.meetingId, limitedView]
     );
     if (!rows[0]) return res.json({ data: null });
 
@@ -106,9 +109,8 @@ meetingMinutesRouter.get(
 
 meetingMinutesRouter.post(
   "/",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.meetingId);
+    await assertMeetingLeadership(req.user, req.params.meetingId);
     requireFields(req.body, ["content"]);
 
     const existing = await pool.query("SELECT id FROM minutes WHERE meeting_id = $1", [
@@ -157,9 +159,8 @@ meetingMinutesRouter.post(
  */
 meetingMinutesRouter.post(
   "/generate",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
-    await assertMeetingOrganizer(req.user, req.params.meetingId);
+    await assertMeetingLeadership(req.user, req.params.meetingId);
 
     const existing = await pool.query("SELECT id FROM minutes WHERE meeting_id = $1", [
       req.params.meetingId
@@ -203,10 +204,9 @@ meetingMinutesRouter.post(
 
 minutesRouter.put(
   "/:id",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const minutes = await getMinutes(req.params.id);
-    await assertMeetingOrganizer(req.user, minutes.meeting_id);
+    await assertMeetingLeadership(req.user, minutes.meeting_id);
     await assertNotSigned(req.params.id);
     requireFields(req.body, ["content"]);
 
@@ -298,10 +298,9 @@ minutesRouter.post(
 /** Gỡ toàn bộ chữ ký để sửa lại biên bản — thao tác này được ghi nhật ký. */
 minutesRouter.delete(
   "/:id/signatures",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const minutes = await getMinutes(req.params.id);
-    await assertMeetingOrganizer(req.user, minutes.meeting_id);
+    await assertMeetingChairman(req.user, minutes.meeting_id);
     if (minutes.status === "PUBLISHED") {
       throw badRequest("Biên bản đã ban hành, không gỡ chữ ký được");
     }
@@ -325,10 +324,9 @@ minutesRouter.delete(
 
 minutesRouter.put(
   "/:id/publish",
-  requireRole("ORGANIZER"),
   asyncHandler(async (req, res) => {
     const minutes = await getMinutes(req.params.id);
-    await assertMeetingOrganizer(req.user, minutes.meeting_id);
+    await assertMeetingChairman(req.user, minutes.meeting_id);
     if (!minutes.content?.trim()) throw badRequest("Biên bản chưa có nội dung");
 
     const integrity = await verifyMinutesIntegrity(minutes);
@@ -340,6 +338,9 @@ minutesRouter.put(
         "Chữ ký không còn hợp lệ vì nội dung đã thay đổi. Hãy ký lại trước khi ban hành."
       );
     }
+    // Cố tình KHÔNG bắt buộc đủ cả chữ ký chủ tọa lẫn thư ký: có lúc cần ban hành
+    // gấp mà một trong hai người chưa ký kịp. Ai đã ký vẫn hiện rõ trong hồ sơ
+    // biên bản và bản PDF, nên trách nhiệm vẫn truy được.
 
     const { rows } = await pool.query(
       `UPDATE minutes
@@ -397,8 +398,11 @@ minutesRouter.get(
 
 async function exportPdf(req, res) {
   const minutes = await getMinutes(req.params.id);
-  await assertMeetingAccess(req.user, minutes.meeting_id);
-  if (req.user.role === "PARTICIPANT" && minutes.status !== "PUBLISHED") {
+  const meeting = await assertMeetingAccess(req.user, minutes.meeting_id);
+  if (
+    minutes.status !== "PUBLISHED" &&
+    !(await canSeeFullMeetingRecord(req.user, meeting))
+  ) {
     throw forbidden("Biên bản chưa được ban hành");
   }
   if (!hasVietnameseFonts()) {

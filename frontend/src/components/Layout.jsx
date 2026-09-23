@@ -8,11 +8,13 @@ import {
   Menu,
   Network,
   ScrollText,
+  UserCog,
   Users,
   X
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import { useAuth } from "../auth/AuthContext.jsx";
 import { useNotifications } from "../notifications/NotificationContext.jsx";
 import { NotificationBell } from "./NotificationBell.jsx";
@@ -26,18 +28,21 @@ const navByRole = {
     ["Phòng họp", "/admin/rooms", DoorOpen],
     ["Cuộc họp", "/admin/meetings", CalendarDays],
     ["Nhật ký truy vết", "/admin/audit-logs", ScrollText],
-    ["Thông báo", "/admin/notifications", Bell]
+    ["Thông báo", "/admin/notifications", Bell],
+    ["Hồ sơ cá nhân", "/profile", UserCog]
   ],
   ORGANIZER: [
     ["Dashboard", "/organizer/dashboard", LayoutDashboard],
     ["Cuộc họp", "/organizer/meetings", CalendarDays],
-    ["Thông báo", "/organizer/notifications", Bell]
+    ["Thông báo", "/organizer/notifications", Bell],
+    ["Hồ sơ cá nhân", "/profile", UserCog]
   ],
   PARTICIPANT: [
     ["Dashboard", "/participant/dashboard", LayoutDashboard],
     ["Cuộc họp", "/participant/meetings", CalendarDays],
     ["Nhiệm vụ", "/participant/tasks", CheckSquare],
-    ["Thông báo", "/participant/notifications", Bell]
+    ["Thông báo", "/participant/notifications", Bell],
+    ["Hồ sơ cá nhân", "/profile", UserCog]
   ]
 };
 
@@ -59,11 +64,14 @@ function initials(user) {
 }
 
 function pageTitle(pathname) {
+  if (pathname.includes("profile")) return "Hồ sơ cá nhân";
   if (pathname.includes("notifications")) return "Thông báo";
+  if (pathname.includes("audit-logs")) return "Nhật ký truy vết";
   if (pathname.includes("users")) return "Quản lý người dùng";
   if (pathname.includes("departments")) return "Quản lý phòng ban";
   if (pathname.includes("rooms")) return "Quản lý phòng họp";
   if (pathname.includes("/live")) return "Phòng họp trực tuyến";
+  if (/\/meetings\/[^/]+$/.test(pathname)) return "Chi tiết cuộc họp";
   if (pathname.includes("meetings")) return "Quản lý cuộc họp";
   if (pathname.includes("tasks")) return "Nhiệm vụ của tôi";
   return "Dashboard";
@@ -136,18 +144,24 @@ export function Layout() {
           </div>
           <div className="topbar-user">
             <NotificationBell />
-            <div className="avatar">{initials(user)}</div>
-            <div className="topbar-identity">
+            {/* Bấm vào tên mình là vào thẳng hồ sơ cá nhân. */}
+            <NavLink to="/profile" className="avatar" title="Hồ sơ cá nhân">
+              {initials(user)}
+            </NavLink>
+            <NavLink to="/profile" className="topbar-identity" title="Hồ sơ cá nhân">
               <strong>{user?.full_name || user?.email}</strong>
               <span>{user?.email}</span>
-            </div>
+            </NavLink>
             <button className="ghost-button" onClick={logout}>
               <LogOut size={16} />
               <span>Đăng xuất</span>
             </button>
           </div>
         </header>
-        <Outlet />
+        {/* Một trang lỗi không được phép làm trắng cả ứng dụng. */}
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );

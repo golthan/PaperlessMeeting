@@ -39,9 +39,13 @@ export const AUDIT_ACTIONS = {
   DOCUMENT_AI_SUMMARY: "DOCUMENT_AI_SUMMARY",
   DOCUMENT_AI_ASK: "DOCUMENT_AI_ASK",
 
+  MINUTES_AI_DISCUSSION: "MINUTES_AI_DISCUSSION",
+
+  TRANSCRIPT_EDIT: "TRANSCRIPT_EDIT",
+  TRANSCRIPT_DELETE: "TRANSCRIPT_DELETE",
+
   ATTENDANCE_CHECKIN: "ATTENDANCE_CHECKIN",
   ATTENDANCE_UPDATE: "ATTENDANCE_UPDATE",
-  ATTENDANCE_QR: "ATTENDANCE_QR",
 
   VOTE_CREATE: "VOTE_CREATE",
   VOTE_OPEN: "VOTE_OPEN",
@@ -58,7 +62,12 @@ export const AUDIT_ACTIONS = {
 
   USER_CREATE: "USER_CREATE",
   USER_UPDATE: "USER_UPDATE",
-  USER_DELETE: "USER_DELETE"
+  USER_DELETE: "USER_DELETE",
+  USER_REGISTER: "USER_REGISTER",
+  USER_APPROVE: "USER_APPROVE",
+  USER_REJECT: "USER_REJECT",
+  USER_PROFILE_UPDATE: "USER_PROFILE_UPDATE",
+  USER_PASSWORD_CHANGE: "USER_PASSWORD_CHANGE"
 };
 
 /** Nhãn tiếng Việt để hiển thị trong trang nhật ký. */
@@ -85,9 +94,9 @@ export const AUDIT_ACTION_LABELS = {
   DOCUMENT_PRESENT: "Trình chiếu tài liệu",
   DOCUMENT_AI_SUMMARY: "Tóm tắt tài liệu bằng AI",
   DOCUMENT_AI_ASK: "Hỏi AI về tài liệu",
+  MINUTES_AI_DISCUSSION: "AI tổng hợp thảo luận",
   ATTENDANCE_CHECKIN: "Điểm danh",
   ATTENDANCE_UPDATE: "Sửa điểm danh",
-  ATTENDANCE_QR: "Tạo mã QR điểm danh",
   VOTE_CREATE: "Tạo biểu quyết",
   VOTE_OPEN: "Mở biểu quyết",
   VOTE_CLOSE: "Chốt biểu quyết",
@@ -101,7 +110,12 @@ export const AUDIT_ACTION_LABELS = {
   MINUTES_VERIFY: "Tra cứu biên bản",
   USER_CREATE: "Tạo tài khoản",
   USER_UPDATE: "Sửa tài khoản",
-  USER_DELETE: "Xoá tài khoản"
+  USER_DELETE: "Xoá tài khoản",
+  USER_REGISTER: "Đăng ký tài khoản",
+  USER_APPROVE: "Duyệt tài khoản",
+  USER_REJECT: "Từ chối đăng ký",
+  USER_PROFILE_UPDATE: "Cập nhật hồ sơ cá nhân",
+  USER_PASSWORD_CHANGE: "Đổi mật khẩu"
 };
 
 /** Nhóm hành động, dùng cho bộ lọc nhanh trên giao diện. */
@@ -113,7 +127,18 @@ export const AUDIT_GROUPS = {
   ),
   VOTE: Object.keys(AUDIT_ACTIONS).filter((key) => key.startsWith("VOTE")),
   ATTENDANCE: Object.keys(AUDIT_ACTIONS).filter((key) => key.startsWith("ATTENDANCE")),
-  ACCOUNT: ["LOGIN", "LOGIN_FAILED", "USER_CREATE", "USER_UPDATE", "USER_DELETE"]
+  ACCOUNT: [
+    "LOGIN",
+    "LOGIN_FAILED",
+    "USER_CREATE",
+    "USER_UPDATE",
+    "USER_DELETE",
+    "USER_REGISTER",
+    "USER_APPROVE",
+    "USER_REJECT",
+    "USER_PROFILE_UPDATE",
+    "USER_PASSWORD_CHANGE"
+  ]
 };
 
 function clientIp(req) {

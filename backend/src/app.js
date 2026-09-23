@@ -24,6 +24,10 @@ import {
 } from "./modules/participants/participants.routes.js";
 import { roomsRouter } from "./modules/rooms/rooms.routes.js";
 import { meetingTasksRouter, tasksRouter } from "./modules/tasks/tasks.routes.js";
+import {
+  meetingTranscriptRouter,
+  transcriptRouter
+} from "./modules/transcript/transcript.routes.js";
 import { usersRouter } from "./modules/users/users.routes.js";
 import { meetingVotesRouter, votesRouter } from "./modules/votes/votes.routes.js";
 
@@ -61,6 +65,8 @@ app.use("/api/votes", votesRouter);
 app.use("/api/meetings/:meetingId/chat", chatRouter);
 app.use("/api/meetings/:meetingId/public-notes", publicNotesRouter);
 app.use("/api/meetings/:meetingId/personal-notes", personalNotesRouter);
+app.use("/api/meetings/:meetingId/transcript", meetingTranscriptRouter);
+app.use("/api/transcript", transcriptRouter);
 app.use("/api/meetings/:meetingId/minutes", meetingMinutesRouter);
 app.use("/api/minutes", minutesRouter);
 app.use("/api/meetings/:meetingId/tasks", meetingTasksRouter);

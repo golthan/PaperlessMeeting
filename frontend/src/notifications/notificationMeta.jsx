@@ -8,7 +8,10 @@ import {
   Mail,
   PlayCircle,
   Timer,
+  UserCheck,
   UserMinus,
+  UserPlus,
+  UserX,
   Video,
   Vote
 } from "lucide-react";
@@ -31,7 +34,10 @@ const META = {
   VOTE_CLOSED: { icon: Vote, label: "Biểu quyết" },
   MINUTES_PUBLISHED: { icon: FileText, label: "Biên bản" },
   TASK_ASSIGNED: { icon: CheckSquare, label: "Nhiệm vụ mới" },
-  TASK_UPDATED: { icon: CheckSquare, label: "Cập nhật nhiệm vụ" }
+  TASK_UPDATED: { icon: CheckSquare, label: "Cập nhật nhiệm vụ" },
+  ACCOUNT_REGISTERED: { icon: UserPlus, label: "Đăng ký chờ duyệt" },
+  ACCOUNT_APPROVED: { icon: UserCheck, label: "Duyệt tài khoản" },
+  ACCOUNT_REJECTED: { icon: UserX, label: "Từ chối đăng ký" }
 };
 
 export const NOTIFICATION_FILTERS = [
