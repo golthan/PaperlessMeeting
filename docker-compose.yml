@@ -35,6 +35,9 @@ services:
       ADMINER_DESIGN: pepa-linha
     ports:
       - "8080:8080"
+    volumes:
+      # Tu dang nhap vao database demo, mo trang la thay ngay danh sach bang.
+      - ./scripts/adminer/auto-login.php:/var/www/html/plugins-enabled/paperless-auto-login.php:ro
     depends_on:
       - postgres
 

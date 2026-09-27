@@ -81,6 +81,8 @@ function severity(value) {
 export function useNotificationCenter(auth, socket) {
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
+  // Tổng số thông báo trên máy chủ; danh sách chỉ tải 40 cái gần nhất.
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const seenIds = useRef(new Set());
@@ -96,6 +98,7 @@ export function useNotificationCenter(auth, socket) {
       const list = result.data || [];
       setItems(list);
       setUnread(result.meta?.unread || 0);
+      setTotal(result.meta?.total ?? list.length);
       setError("");
 
       if (primed.current) {
@@ -124,6 +127,7 @@ export function useNotificationCenter(auth, socket) {
     if (!auth?.token) {
       setItems([]);
       setUnread(0);
+      setTotal(0);
       primed.current = false;
       seenIds.current = new Set();
       return undefined;
@@ -139,6 +143,7 @@ export function useNotificationCenter(auth, socket) {
       if (!notification?.id || seenIds.current.has(notification.id)) return;
       seenIds.current.add(notification.id);
       setItems((list) => [notification, ...list].slice(0, 60));
+      setTotal((value) => value + 1);
       if (!notification.is_read) setUnread((value) => value + 1);
       toastRef.current.push({
         tone: TOAST_TONE[notification.severity] || "notification",
@@ -184,7 +189,7 @@ export function useNotificationCenter(auth, socket) {
     [auth?.token, load]
   );
 
-  return { items, unread, loading, error, refresh: load, markRead, markAllRead, removeOne };
+  return { items, unread, total, loading, error, refresh: load, markRead, markAllRead, removeOne };
 }
 
 function NotificationCard({ notification, onPress, onRemove }) {
@@ -268,7 +273,7 @@ export function NotificationsScreen({ center, onOpenMeeting, onBack }) {
 
       <View style={styles.filterRow}>
         {[
-          ["ALL", `Tất cả (${center.items.length})`],
+          ["ALL", `Tất cả (${center.total})`],
           ["UNREAD", `Chưa đọc (${center.unread})`]
         ].map(([value, label]) => (
           <Pressable

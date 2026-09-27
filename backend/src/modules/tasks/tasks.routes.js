@@ -125,7 +125,7 @@ tasksRouter.get(
        FROM meeting_tasks t
        JOIN meetings m ON m.id = t.meeting_id
        JOIN users assigner ON assigner.id = t.assigned_by
-       WHERE t.assigned_to = $1 AND t.deleted_at IS NULL
+       WHERE t.assigned_to = $1 AND t.deleted_at IS NULL AND m.deleted_at IS NULL
        ORDER BY COALESCE(t.deadline, CURRENT_DATE + INTERVAL '100 years') ASC`,
       [req.user.id]
     );

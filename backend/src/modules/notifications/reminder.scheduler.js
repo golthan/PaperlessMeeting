@@ -41,6 +41,8 @@ async function markOverdueTasks() {
     `UPDATE meeting_tasks
      SET status = 'OVERDUE', updated_at = now()
      WHERE deleted_at IS NULL
+       -- Cuộc họp đã xoá khỏi lịch thì nhiệm vụ của nó không còn hiệu lực.
+       AND meeting_id NOT IN (SELECT id FROM meetings WHERE deleted_at IS NOT NULL)
        AND status IN ('TODO', 'IN_PROGRESS')
        AND deadline IS NOT NULL
        AND deadline < CURRENT_DATE

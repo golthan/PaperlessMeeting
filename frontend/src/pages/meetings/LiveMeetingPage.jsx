@@ -322,6 +322,10 @@ export function LiveMeetingPage() {
     });
     socket.on("speaker_updated", ({ userId }) => {
       setConfig((current) => (current ? { ...current, currentSpeakerId: userId } : current));
+      // Chỉ cấp quyền nói, không tự mở micro: người được mời tự bấm khi sẵn sàng.
+      if (userId === user.id) {
+        setNotice("Chủ tọa mời bạn phát biểu. Bấm nút micro khi bạn sẵn sàng nói.");
+      }
       loadData().catch(() => {});
     });
     socket.on("speak_permission_updated", ({ userId: targetId, canSpeak }) => {

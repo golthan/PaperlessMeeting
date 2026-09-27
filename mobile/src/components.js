@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -10,6 +12,25 @@ import {
   View
 } from "react-native";
 import { colors, radii, shadow, spacing } from "./theme";
+
+/**
+ * Đẩy nội dung lên trên bàn phím.
+ *
+ * Expo SDK 54 bật chế độ tràn viền (edge-to-edge) trên Android nên cửa sổ không còn
+ * tự co lại khi bàn phím hiện (adjustResize mất tác dụng): ô nhập ở nửa dưới màn
+ * hình — khung chat, ô hỏi AI, ghi chú — bị bàn phím che mất, gõ mà không thấy chữ.
+ * iOS vẫn tự xử lý theo từng màn hình nên ở đây chỉ bật cho Android.
+ */
+export function KeyboardSafe({ style, children }) {
+  return (
+    <KeyboardAvoidingView
+      style={[styles.keyboardSafe, style]}
+      behavior={Platform.OS === "android" ? "padding" : undefined}
+    >
+      {children}
+    </KeyboardAvoidingView>
+  );
+}
 
 /**
  * Hiệu ứng bấm dùng chung: phần tử thu nhỏ khi ngón tay chạm và bật lại khi nhả.
@@ -515,6 +536,9 @@ export function CardRow({ title, subtitle, meta, right, onPress }) {
 }
 
 const styles = StyleSheet.create({
+  keyboardSafe: {
+    flex: 1
+  },
   /* Header */
   header: {
     backgroundColor: colors.surface,

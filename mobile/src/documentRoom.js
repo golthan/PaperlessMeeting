@@ -4,8 +4,10 @@ import {
   ActivityIndicator,
   Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +17,7 @@ import { apiRequest } from "./api";
 import {
   EmptyState,
   ErrorState,
+  KeyboardSafe,
   Panel,
   PrimaryButton,
   SecondaryButton,
@@ -217,7 +220,8 @@ export function DocumentRoom({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.screen}>
+      {/* Modal là cửa sổ riêng, không hưởng KeyboardSafe ở gốc app. */}
+      <KeyboardSafe style={styles.screen}>
         <View style={styles.bar}>
           <Pressable onPress={onClose} hitSlop={10} accessibilityLabel="Đóng tài liệu">
             <Ionicons name="chevron-down" size={24} color={colors.primaryDark} />
@@ -405,7 +409,7 @@ export function DocumentRoom({
             )}
           </ScrollView>
         )}
-      </View>
+      </KeyboardSafe>
     </Modal>
   );
 }
@@ -413,7 +417,9 @@ export function DocumentRoom({
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.background,
-    flex: 1
+    flex: 1,
+    // Modal cũng vẽ tràn viền: không chừa chỗ thì tiêu đề đè lên giờ và pin.
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0
   },
   bar: {
     alignItems: "center",

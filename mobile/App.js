@@ -20,7 +20,7 @@ import { NotificationsScreen, useNotificationCenter } from "./src/notifications"
 import { closeSharedSocket, useSocket } from "./src/realtime";
 import { ToastProvider, useToast } from "./src/toast";
 import { colors } from "./src/theme";
-import { BottomTabs, Header } from "./src/components";
+import { BottomTabs, Header, KeyboardSafe } from "./src/components";
 
 const TAB_SCREENS = ["dashboard", "meetings", "notifications", "tasks", "profile"];
 
@@ -109,7 +109,11 @@ function AppShell() {
   }
 
   if (!token || !user) {
-    return <LoginScreen auth={auth} />;
+    return (
+      <KeyboardSafe>
+        <LoginScreen auth={auth} />
+      </KeyboardSafe>
+    );
   }
 
   const showDetail = screen.name === "meetingDetail";
@@ -147,7 +151,8 @@ function AppShell() {
         }
         unreadCount={notificationCenter.unread}
       />
-      <View style={styles.content}>
+      {/* Bàn phím che thanh tab bên dưới là bình thường; chỉ nội dung được đẩy lên. */}
+      <KeyboardSafe style={styles.content}>
         {screen.name === "dashboard" && (
           <DashboardScreen auth={auth} refreshKey={refreshKey} />
         )}
@@ -189,7 +194,7 @@ function AppShell() {
             }
           />
         )}
-      </View>
+      </KeyboardSafe>
       {!showNested && (
         <BottomTabs
           active={TAB_SCREENS.includes(screen.name) ? screen.name : "dashboard"}

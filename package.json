@@ -8,18 +8,25 @@
   ],
   "overrides": {
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "@livekit/react-native-webrtc": "144.1.2",
+    "expo-font": "~14.0.12"
   },
   "scripts": {
     "install:all": "npm install --workspaces",
     "dev:backend": "npm --workspace backend run dev",
     "dev:frontend": "npm --workspace frontend run dev",
     "dev:mobile": "npm --workspace mobile run start",
+    "demo": "powershell -ExecutionPolicy Bypass -File scripts/start-demo.ps1",
     "android": "npm --workspace mobile run android",
     "android:emu": "powershell -ExecutionPolicy Bypass -File scripts/start-android.ps1",
+    "android:build": "powershell -ExecutionPolicy Bypass -File scripts/build-android.ps1",
+    "android:expogo": "powershell -ExecutionPolicy Bypass -File scripts/start-expo-go.ps1",
     "test:windows": "powershell -ExecutionPolicy Bypass -File scripts/open-test-windows.ps1",
     "seed": "npm --workspace backend run seed",
     "migrate": "npm --workspace backend run migrate",
+    "db:view": "powershell -ExecutionPolicy Bypass -File scripts/open-db.ps1",
+    "db:queries": "docker exec -i paperless-meeting-postgres psql -U paperless -d paperless_meeting -q < scripts/db-demo-queries.sql",
     "check": "npm --workspace backend run check && npm --workspace frontend run build && npm --workspace mobile run export:android"
   }
 }
