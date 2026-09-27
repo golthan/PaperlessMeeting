@@ -1,7 +1,6 @@
 import express from "express";
 import { pool } from "../../config/db.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
-import { requireRole } from "../../middlewares/role.middleware.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { badRequest, notFound } from "../../utils/httpError.js";
 import {
@@ -336,9 +335,10 @@ votesRouter.delete(
 
 votesRouter.post(
   "/:id/responses",
-  requireRole("PARTICIPANT"),
   asyncHandler(async (req, res) => {
     const vote = await getVote(req.params.id);
+    // Quyền bỏ phiếu tính theo thành phần cuộc họp, không theo vai trò hệ thống:
+    // tài khoản ORGANIZER làm chủ tọa hay thành viên vẫn phải bỏ phiếu được.
     await assertParticipantAccess(req.user, vote.meeting_id);
     if (vote.status !== "OPEN") throw badRequest("Biểu quyết chưa mở hoặc đã đóng");
     requireFields(req.body, ["answer"]);

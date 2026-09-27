@@ -98,6 +98,12 @@ function friendlyAiError(error) {
         "(khoá thật có dạng sk-ant-api03-...) rồi khởi động lại backend."
     );
   }
+  if (status === 404) {
+    return badRequest(
+      `Không tìm thấy model "${env.aiModel}". Kiểm tra AI_MODEL trong backend/.env ` +
+        "(tên viết bằng dấu gạch ngang, ví dụ claude-opus-5-5) rồi khởi động lại backend."
+    );
+  }
   if (status === 429) {
     return badRequest("Đã chạm giới hạn gọi API của Anthropic, thử lại sau ít phút");
   }
@@ -133,13 +139,28 @@ async function callClaude(params) {
   }
 }
 
+/**
+ * Gỡ ký hiệu markdown còn sót (**in đậm**, # tiêu đề).
+ *
+ * Kết quả AI được hiển thị dạng văn bản thuần và in thẳng vào biên bản PDF có ký
+ * số; prompt đã dặn không dùng markdown, đây là lớp bảo vệ khi mô hình vẫn lỡ dùng.
+ */
+function toPlainText(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .trim();
+}
+
 /** Gom các khối text trong câu trả lời thành một chuỗi. */
 function extractText(response) {
-  return response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("")
-    .trim();
+  return toPlainText(
+    response.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("")
+  );
 }
 
 /** Lấy trích dẫn (đoạn trích + số trang) để hiển thị dưới câu trả lời. */
@@ -177,7 +198,8 @@ Yêu cầu:
 - Bắt đầu bằng 1-2 câu nêu tài liệu này nói về việc gì.
 - Sau đó liệt kê tối đa 6 gạch đầu dòng cho các nội dung chính, số liệu quan trọng và đề xuất cần quyết định.
 - Nếu tài liệu có nội dung cần biểu quyết hoặc cần xin ý kiến, nêu rõ ở cuối.
-- Chỉ dùng thông tin có trong tài liệu, không suy diễn thêm.`;
+- Chỉ dùng thông tin có trong tài liệu, không suy diễn thêm.
+- Văn bản thuần, KHÔNG dùng ký hiệu markdown (không **, không #); gạch đầu dòng bằng "- ".`;
 
 const DISCUSSION_SYSTEM = `Bạn là thư ký cuộc họp của một cơ quan nhà nước Việt Nam.
 Nhiệm vụ: đọc toàn bộ trao đổi trong phòng họp và dựng phần "Diễn biến và ý kiến thảo luận"
@@ -185,12 +207,18 @@ của biên bản.
 Yêu cầu:
 - Viết bằng tiếng Việt, văn phong hành chính, xưng hô trung lập (không dùng "tôi", "bạn").
 - Gom ý kiến theo CHỦ ĐỀ, không thuật lại từng tin nhắn theo thứ tự thời gian.
-- Trình bày đúng bốn mục sau, mỗi mục là một đề mục in đậm:
-  **Các nội dung đã trao đổi** - mỗi chủ đề một gạch đầu dòng, nêu rõ ai nêu ý kiến gì.
-  **Điểm đã thống nhất** - những việc mọi người đồng thuận.
-  **Điểm còn ý kiến khác nhau** - nêu các luồng ý kiến trái chiều và người đại diện từng luồng.
-  **Việc cần làm tiếp** - đề xuất nhiệm vụ hoặc nội dung cần quyết định, nếu có.
-- Mục nào không có dữ liệu thì ghi "Không có".
+- Văn bản thuần để in vào biên bản có ký số: KHÔNG dùng ký hiệu markdown (không **, không #).
+  Không viết lại tiêu đề "Diễn biến và ý kiến thảo luận" vì biên bản đã có.
+- Trình bày đúng bốn đề mục đánh số sau, mỗi ý bên dưới bắt đầu bằng "- ":
+  1. Các nội dung đã trao đổi: mỗi chủ đề một ý, nêu rõ ai nêu ý kiến gì.
+  2. Điểm đã thống nhất: những việc mọi người đồng thuận.
+  3. Điểm còn ý kiến khác nhau: các luồng ý kiến trái chiều CÒN LẠI lúc kết thúc và người
+     đại diện từng luồng. Ý kiến trái chiều đã được dung hoà thì kể ở đề mục 1, không kể ở đây.
+  4. Việc cần làm tiếp: nội dung còn phải xử lý mà chưa được giao hay chưa được quyết định.
+- Đề mục nào không có dữ liệu thì ghi "- Không có."
+- Kết quả biểu quyết và phân công nhiệm vụ được ghi ở mục riêng của biên bản (danh sách
+  gửi kèm chỉ để tham chiếu). Không nhắc lại chi tiết, không đưa việc đã giao vào đề mục 4,
+  và tuyệt đối không viết rằng cuộc họp chưa biểu quyết hay chưa giao nhiệm vụ.
 - CHỈ dùng thông tin có trong trao đổi. Tuyệt đối không suy diễn, không thêm kết luận
   mà không ai nói ra, không bịa số liệu.
 - Nêu đúng tên người phát biểu như trong bản ghi.
@@ -204,7 +232,8 @@ Trả lời câu hỏi của đại biểu chỉ dựa trên nội dung tài li�
 Yêu cầu:
 - Trả lời bằng tiếng Việt, đi thẳng vào ý chính, tối đa 5 câu.
 - Nếu tài liệu không có thông tin để trả lời, nói rõ "Tài liệu không đề cập nội dung này" thay vì đoán.
-- Khi nêu số liệu, trích đúng con số trong tài liệu.`;
+- Khi nêu số liệu, trích đúng con số trong tài liệu.
+- Văn bản thuần, KHÔNG dùng ký hiệu markdown (không **, không #).`;
 
 /** Tóm tắt một tài liệu. */
 export async function summarizeDocument(document) {
@@ -263,7 +292,9 @@ export async function summarizeDiscussion({
   meeting,
   agenda = [],
   messages = [],
-  speech = []
+  speech = [],
+  votes = [],
+  tasks = []
 }) {
   const timeline = [
     ...messages.map((item) => ({
@@ -290,6 +321,17 @@ export async function summarizeDiscussion({
         .join("\n")}\n\n`
     : "";
 
+  // Biểu quyết và nhiệm vụ đã có mục riêng trong biên bản. Không gửi kèm thì mô
+  // hình chỉ thấy câu "mình biểu quyết nhé" trong chat rồi kết luận là chưa biểu
+  // quyết, làm biên bản tự mâu thuẫn với chính mục kết quả biểu quyết.
+  const recordedLines = [
+    ...votes.map((vote) => `- Biểu quyết: ${vote.title}${vote.status === "CLOSED" ? " (đã chốt)" : " (đang mở)"}`),
+    ...tasks.map((task) => `- Nhiệm vụ: ${task.title} — giao cho ${task.assignee_name}`)
+  ];
+  const recordedBlock = recordedLines.length
+    ? `Đã ghi ở mục riêng của biên bản (chỉ để tham chiếu, không nhắc lại):\n${recordedLines.join("\n")}\n\n`
+    : "";
+
   const response = await callClaude({
     model: env.aiModel,
     max_tokens: 16000,
@@ -307,6 +349,7 @@ export async function summarizeDiscussion({
               (meeting.description ? `Nội dung chính: ${meeting.description}\n` : "") +
               "\n" +
               agendaBlock +
+              recordedBlock +
               "Diễn biến trong phòng họp, xếp theo thời gian " +
               `(${speech.length} lượt phát biểu được ghi âm chuyển chữ, ` +
               `${messages.length} tin nhắn gõ tay):\n` +

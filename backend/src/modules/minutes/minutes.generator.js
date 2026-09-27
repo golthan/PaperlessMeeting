@@ -43,7 +43,7 @@ function percent(count, total) {
 
 /** Lấy toàn bộ dữ liệu cần cho biên bản trong một lần. */
 async function loadMeetingData(meetingId) {
-  const [meeting, participants, agenda, documents, votes, notes, tasks] =
+  const [meeting, participants, agenda, documents, votes, notes, tasks, actual] =
     await Promise.all([
       pool.query(
         `SELECT m.*, r.name AS room_name, r.location AS room_location,
@@ -101,10 +101,20 @@ async function loadMeetingData(meetingId) {
          WHERE t.meeting_id = $1 AND t.deleted_at IS NULL
          ORDER BY t.created_at ASC`,
         [meetingId]
+      ),
+      // Giờ bắt đầu / kết thúc thực tế lấy từ nhật ký truy vết: bảng meetings chỉ
+      // lưu giờ theo lịch, mà chủ tọa có thể mở họp muộn hoặc kết thúc sớm.
+      pool.query(
+        `SELECT MIN(created_at) FILTER (WHERE action = 'MEETING_START') AS started_at,
+                MAX(created_at) FILTER (WHERE action = 'MEETING_FINISH') AS finished_at
+         FROM audit_logs
+         WHERE meeting_id = $1 AND action IN ('MEETING_START', 'MEETING_FINISH')`,
+        [meetingId]
       )
     ]);
 
   return {
+    actual: actual.rows[0] || {},
     meeting: meeting.rows[0],
     participants: participants.rows,
     agenda: agenda.rows,
@@ -156,7 +166,7 @@ export function summarizeVote(vote) {
  */
 export async function generateMinutesContent(meetingId) {
   const data = await loadMeetingData(meetingId);
-  const { meeting, participants, agenda, documents, votes, notes, tasks } = data;
+  const { meeting, participants, agenda, documents, votes, notes, tasks, actual } = data;
   if (!meeting) return null;
 
   const present = participants.filter((p) => p.attendance_status === "PRESENT");
@@ -173,8 +183,9 @@ export async function generateMinutesContent(meetingId) {
   push("## I. THÔNG TIN CHUNG");
   push(`Tên cuộc họp: ${meeting.title}`);
   push(`Hình thức: ${TYPE_LABELS[meeting.meeting_type] || meeting.meeting_type}`);
-  push(`Thời gian bắt đầu: ${formatMeetingTime(meeting.start_time)}`);
-  push(`Thời gian kết thúc: ${formatMeetingTime(meeting.end_time)}`);
+  // Chưa bấm bắt đầu / kết thúc (hoặc hệ thống tự đóng) thì dùng giờ theo lịch.
+  push(`Thời gian bắt đầu: ${formatMeetingTime(actual.started_at || meeting.start_time)}`);
+  push(`Thời gian kết thúc: ${formatMeetingTime(actual.finished_at || meeting.end_time)}`);
   push(
     `Địa điểm: ${
       meeting.meeting_type === "ONLINE"
