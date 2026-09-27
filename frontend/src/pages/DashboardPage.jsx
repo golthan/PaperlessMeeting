@@ -1,4 +1,4 @@
-import { Bell, CalendarDays, CheckSquare, DoorOpen, Network, Users } from "lucide-react";
+import { Activity, Bell, CalendarDays, CheckSquare, DoorOpen, Network, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client.js";
@@ -7,6 +7,7 @@ import { EmptyState } from "../components/EmptyState.jsx";
 import { StatGrid } from "../components/StatGrid.jsx";
 import { StatusPill } from "../components/StatusPill.jsx";
 import { useNotifications } from "../notifications/NotificationContext.jsx";
+import { formatDateTime } from "../utils/format.js";
 
 const labels = {
   totalUsers: "Người dùng",
@@ -99,6 +100,40 @@ export function DashboardPage() {
       </section>
 
       <StatGrid stats={stats} />
+
+      {data?.recentActivity && (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Nhật ký truy vết</span>
+              <h2>Hoạt động gần đây trên hệ thống</h2>
+            </div>
+            <Link className="secondary-button" to="/admin/audit-logs">
+              Xem toàn bộ nhật ký
+            </Link>
+          </div>
+          {data.recentActivity.length === 0 ? (
+            <EmptyState
+              icon={Activity}
+              title="Chưa có hoạt động nào"
+              description="Mọi thao tác trên tài liệu, biên bản, biểu quyết và tài khoản sẽ được ghi lại ở đây."
+            />
+          ) : (
+            <ul className="activity-list">
+              {data.recentActivity.map((item) => (
+                <li key={item.id}>
+                  <time>{formatDateTime(item.created_at)}</time>
+                  <div>
+                    <strong>{item.actor_name || "Hệ thống"}</strong>
+                    <span className="activity-action">{item.actionLabel}</span>
+                    <p>{item.description}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {data?.tasksByStatus && (
         <section className="panel">

@@ -3,6 +3,7 @@ import { pool } from "../../config/db.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
 import { requireRole } from "../../middlewares/role.middleware.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
+import { AUDIT_ACTION_LABELS } from "../audit/audit.service.js";
 
 export const dashboardRouter = express.Router();
 
@@ -12,7 +13,9 @@ dashboardRouter.get(
   "/admin",
   requireRole("ADMIN"),
   asyncHandler(async (_req, res) => {
-    const [users, meetings, ongoing, upcoming, rooms, tasks, pendingUsers] = await Promise.all([
+    // Quản trị viên lo phần hệ thống (tài khoản, phòng họp, truy vết), không giao
+    // hay nhận nhiệm vụ họp, nên dashboard hiện hoạt động gần đây thay cho nhiệm vụ.
+    const [users, meetings, ongoing, upcoming, rooms, activity, pendingUsers] = await Promise.all([
       pool.query("SELECT COUNT(*)::int AS count FROM users WHERE status <> 'REJECTED'"),
       pool.query("SELECT COUNT(*)::int AS count FROM meetings WHERE deleted_at IS NULL"),
       pool.query(
@@ -23,7 +26,13 @@ dashboardRouter.get(
       ),
       pool.query("SELECT COUNT(*)::int AS count FROM rooms"),
       pool.query(
-        "SELECT status, COUNT(*)::int AS count FROM meeting_tasks WHERE deleted_at IS NULL GROUP BY status"
+        // Bỏ các lượt đăng nhập thành công: chúng chiếm hết danh sách mà ít giá trị.
+        // Đăng nhập thất bại vẫn hiện vì đó là dấu hiệu cần để ý.
+        `SELECT id, actor_name, actor_role, action, description, created_at
+         FROM audit_logs
+         WHERE action <> 'LOGIN'
+         ORDER BY created_at DESC
+         LIMIT 8`
       ),
       pool.query("SELECT COUNT(*)::int AS count FROM users WHERE status = 'PENDING'")
     ]);
@@ -36,7 +45,10 @@ dashboardRouter.get(
         upcomingMeetings: upcoming.rows[0].count,
         totalRooms: rooms.rows[0].count,
         pendingUsers: pendingUsers.rows[0].count,
-        tasksByStatus: tasks.rows
+        recentActivity: activity.rows.map((row) => ({
+          ...row,
+          actionLabel: AUDIT_ACTION_LABELS[row.action] || row.action
+        }))
       }
     });
   })
@@ -63,7 +75,7 @@ dashboardRouter.get(
         `SELECT t.status, COUNT(*)::int AS count
          FROM meeting_tasks t
          JOIN meetings m ON m.id = t.meeting_id
-         WHERE m.organizer_id = $1 AND t.deleted_at IS NULL
+         WHERE m.organizer_id = $1 AND t.deleted_at IS NULL AND m.deleted_at IS NULL
          GROUP BY t.status`,
         [req.user.id]
       ),
@@ -108,10 +120,11 @@ dashboardRouter.get(
         [req.user.id]
       ),
       pool.query(
-        `SELECT status, COUNT(*)::int AS count
-         FROM meeting_tasks
-         WHERE assigned_to = $1 AND deleted_at IS NULL
-         GROUP BY status`,
+        `SELECT t.status, COUNT(*)::int AS count
+         FROM meeting_tasks t
+         JOIN meetings m ON m.id = t.meeting_id
+         WHERE t.assigned_to = $1 AND t.deleted_at IS NULL AND m.deleted_at IS NULL
+         GROUP BY t.status`,
         [req.user.id]
       ),
       pool.query(

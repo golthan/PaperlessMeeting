@@ -29,15 +29,45 @@ Hệ thống phòng họp không giấy tờ theo spec Live, không tích hợp 
 - Expo Go trên điện thoại Android nếu chạy app mobile bằng QR.
 - Android Studio + JDK 17 nếu muốn build bản mobile có camera/micro (xem [`mobile/README.md`](mobile/README.md)).
 
-## Chạy nhanh bằng Docker PostgreSQL
+## Chạy demo bằng một lệnh (khuyên dùng khi bảo vệ)
+
+Sau khi đã cài đặt lần đầu (mục bên dưới), mỗi lần demo chỉ cần:
+
+```powershell
+npm run demo
+```
+
+Lệnh này tự bật database + máy chủ video + Adminer (Docker), backend, web, emulator Android và
+app mobile, rồi mở sẵn trang web và trang xem database. Bước nào đang chạy rồi thì bỏ qua, nên
+chạy lại bao nhiêu lần cũng được. **Không reset hay seed database** — dữ liệu đang có giữ nguyên.
+
+| Lệnh | Việc làm |
+| --- | --- |
+| `npm run demo` | Bật toàn bộ hệ thống như trên |
+| `npm run android:emu` | Chỉ phần mobile: Docker, backend, emulator, cài và mở app |
+| `npm run android:build` | Build lại APK sau khi sửa code mobile, tự cài và mở lại app |
+| `npm run db:view` | Mở Adminer (tự đăng nhập) và pgAdmin (có sơ đồ ERD) |
+| `npm run db:queries` | In ra bộ truy vấn demo theo nghiệp vụ (16 nhóm) |
+
+Backend và web chạy ở hai cửa sổ PowerShell riêng tên `Paperless - backend` và `Paperless - web`
+để xem log; đóng cửa sổ là tắt dịch vụ đó.
+
+## Cài đặt lần đầu
 
 Từ thư mục gốc dự án:
 
 ```powershell
 npm install
-docker compose up -d postgres
-npm run seed
+Copy-Item backend/.env.example backend/.env   # đổi JWT_SECRET, SIGNING_KEY_SECRET
+docker compose up -d postgres livekit
+npm run seed          # CHỈ chạy trên database trống: lệnh này xoá sạch dữ liệu cũ
+npm run android:build # build app mobile có video, lần đầu 10-20 phút
 ```
+
+Database đã có dữ liệu thì **không chạy `npm run seed`**, dùng `npm run migrate` để cập nhật cấu
+trúc bảng mà giữ nguyên dữ liệu.
+
+## Chạy từng phần bằng tay
 
 Mở 2 terminal:
 
@@ -76,31 +106,44 @@ npm run migrate
 
 Lệnh này chỉ chạy `schema.sql` (các câu lệnh đều dạng `IF NOT EXISTS`) nên không xoá dữ liệu.
 
-## Chạy app Android bằng Emulator (khuyên dùng khi dev)
+## Chạy app Android bằng Emulator
 
-Yêu cầu: Android SDK + emulator đã cài (mặc định ở `%LOCALAPPDATA%\Android\Sdk`) và AVD tên `Pixel_API_36`.
-
-Terminal 1:
-
-```powershell
-npm run dev:backend
-```
-
-Terminal 2:
+Yêu cầu: Android Studio (Android SDK, mặc định ở `%LOCALAPPDATA%\Android\Sdk`), JDK 17 và ít nhất
+một AVD (script tự lấy AVD đầu tiên, hoặc đặt `$env:AVD_NAME`).
 
 ```powershell
 npm run android:emu
 ```
 
-Script sẽ tự bật emulator (nếu chưa chạy), chờ boot xong rồi mở app trong Expo Go. Trong `mobile/.env` cần có:
+App chạy trên emulator là **bản APK release có video native**: vào phòng họp trực tuyến là có
+camera/micro ngay trong app, không phải mở trình duyệt ngoài. Mã JS đóng gói sẵn trong APK nên
+không cần Metro hay Expo Go. Script tự làm các việc dễ quên sau:
 
-```text
-EXPO_PUBLIC_API_URL=http://10.0.2.2:4000/api
+- **Đặt đúng IP cho LiveKit** (`LIVEKIT_NODE_IP`). Mặc định LiveKit quảng bá `127.0.0.1`: trình
+  duyệt trên máy dùng được, nhưng trong emulator `127.0.0.1` lại là chính emulator, nên vào được
+  phòng mà **màn hình đen, không có tiếng**. Script chọn một IP mà cả máy lẫn emulator cùng tới
+  được, ưu tiên card mạng ảo host-only (VirtualBox/VMware/Hyper-V) vì nó vẫn còn khi rút Wi-Fi. IP
+  được ghi vào file `.env` ở thư mục gốc để `docker compose` luôn dùng đúng.
+- **Nối micro laptop vào emulator** (`adb emu avd hostmicon`). Mặc định micro ảo của emulator
+  không nhận tiếng thật, bật mic trong app vẫn chỉ gửi đi im lặng.
+- **Cấp sẵn quyền micro/camera** cho app để lúc demo không hiện hộp thoại xin quyền.
+- Bật backend ở cửa sổ riêng nếu chưa chạy.
+
+Camera trước của emulator là camera giả (hình chuyển động). Muốn dùng webcam thật của laptop:
+`$env:EMU_CAMERA = "webcam0"` rồi tắt hẳn emulator và chạy lại lệnh. Lưu ý Windows chỉ cho một
+chương trình giữ webcam tại một thời điểm, nên web trên cùng máy sẽ không mở được camera nữa.
+
+Sửa code mobile xong thì build lại (1-3 phút cho các lần sau):
+
+```powershell
+npm run android:build
 ```
 
-`10.0.2.2` là địa chỉ đặc biệt trỏ về máy host khi nhìn từ trong emulator. Script cũng đặt `REACT_NATIVE_PACKAGER_HOSTNAME=10.0.2.2` để Expo Go trong emulator tải được JS bundle — nếu chạy `expo start` thủ công thì phải tự đặt biến này.
+Bản APK luôn gọi API ở `http://10.0.2.2:4000/api` — địa chỉ đặc biệt trỏ về máy host khi nhìn từ
+trong emulator — bất kể `mobile/.env` đang để gì.
 
-Phím tắt hữu ích khi app đang chạy: gõ `r` trong terminal Expo để reload, `j` mở JS debugger, `Ctrl+M` trong emulator mở dev menu.
+Chưa build được APK (thiếu Android Studio/JDK) thì vẫn chạy được bằng Expo Go, đủ mọi chức năng
+trừ video trong app: `npm run android:expogo`.
 
 ## Chạy app Android trên điện thoại thật
 
@@ -268,8 +311,12 @@ Cuộc họp có cờ `speaker_mode`:
 - `FREE` — ai cũng tự bật mic (mặc định, hợp với họp nội bộ vài người).
 - `MODERATED` — mặc định tắt mic tất cả **ngay từ lúc tạo cuộc họp**; ai muốn nói thì giơ tay,
   chủ tọa thấy **hàng đợi xếp theo thời điểm giơ tay** (`meeting_participants.hand_raised_at`)
-  và bấm *Mời phát biểu*. Hệ thống bật mic người được mời, thu mic người trước đó và ghi lại ở
-  `meetings.current_speaker_id`.
+  và bấm *Mời phát biểu*. Hệ thống **cấp quyền nói** cho người được mời, thu quyền của người
+  trước đó và ghi lại ở `meetings.current_speaker_id`.
+
+  Hệ thống **không tự mở micro** của người được mời: chủ tọa chỉ cấp quyền, còn bật hay tắt
+  micro là quyền của người nói, tránh thu tiếng khi họ chưa sẵn sàng. App hiện hộp thoại
+  *Để sau / Bật micro*, web hiện dòng nhắc bấm nút micro; nút micro bật tắt được bất cứ lúc nào.
 
 ```text
 PUT /meetings/:id/chairman                  trao quyền chủ tọa cho người khác
@@ -612,26 +659,36 @@ LIVEKIT_WS_URL=
 
 Key/secret mặc định phải khớp với `livekit.yaml`. Khi triển khai thật, đổi secret ở cả hai nơi.
 
-Test bằng điện thoại/emulator (media chạy qua UDP nên LiveKit cần quảng bá đúng IP):
+Hai địa chỉ LiveKit trong `backend/.env` dễ nhầm với nhau:
+
+| Biến | Ai dùng | Để làm gì |
+| --- | --- | --- |
+| `LIVEKIT_WS_URL` | Trình duyệt và app mobile | Địa chỉ máy chủ video để nối vào phòng. Backend chỉ trả nguyên giá trị này về trong `live-config`. **Để trống khi dev**: web tự dùng `ws://<hostname đang mở trang>:7880`, mobile dùng `ws://<host của API>:7880`. Chỉ đặt khi triển khai thật (`wss://video.tenmien.vn`) hoặc LiveKit nằm máy khác. Đừng đặt `ws://localhost:7880` — điện thoại/emulator sẽ tìm LiveKit trên chính nó. |
+| `LIVEKIT_HOST_URL` | Backend | Gọi API quản trị của LiveKit để đổi quyền phát biểu của người đang trong phòng. |
+
+Hình và tiếng chạy qua UDP nên LiveKit phải quảng bá một IP mà thiết bị tới được
+(`LIVEKIT_NODE_IP`). `npm run android:emu` / `npm run demo` tự đặt. Thử bằng điện thoại thật thì
+đặt IP Wi-Fi của máy rồi chạy lại:
 
 ```powershell
 $env:LIVEKIT_NODE_IP = "192.168.1.5"   # IP LAN của máy chạy Docker
-docker compose up -d livekit
+npm run android:emu                    # hoặc: docker compose up -d livekit
 ```
 
-Lưu ý trình duyệt trên điện thoại/emulator chặn camera/mic với trang `http://` không phải localhost (insecure context). Khi demo, mở `chrome://flags/#unsafely-treat-insecure-origin-as-secure` trên thiết bị, thêm `http://<IP LAN>:5173` (emulator: `http://10.0.2.2:5173`) rồi bật lại Chrome.
+Lưu ý trình duyệt trên điện thoại/emulator chặn camera/mic với trang `http://` không phải localhost (insecure context). Vì vậy app mobile dùng video native ngay trong app; đường mở phòng bằng trình duyệt chỉ còn là phương án dự phòng cho Expo Go.
 
 ## Xem database bằng giao diện web (dùng khi bảo vệ đồ án)
 
 Khi cần chiếu màn hình cho thầy cô xem dữ liệu thật đang nằm trong database — các bảng, các dòng, khoá ngoại, sơ đồ quan hệ — dự án có sẵn hai công cụ chạy bằng Docker, **không phải cài gì thêm trên máy**.
 
-Hai dịch vụ này nằm trong profile `tools` nên không tự chạy cùng `docker compose up -d postgres`; chỉ bật khi cần:
+Bật và mở cả hai trên trình duyệt bằng một lệnh (`npm run demo` cũng tự bật Adminer):
 
 ```powershell
-docker compose --profile tools up -d adminer pgadmin
+npm run db:view
 ```
 
-Bật xong mở trình duyệt:
+Hai dịch vụ này nằm trong profile `tools` nên không tự chạy cùng `docker compose up -d postgres`.
+Bật bằng tay: `docker compose --profile tools up -d adminer pgadmin`.
 
 | Công cụ | Địa chỉ | Dùng khi nào |
 | --- | --- | --- |
@@ -646,14 +703,17 @@ docker compose --profile tools stop adminer pgadmin
 
 ### Adminer — xem bảng kiểu phpMyAdmin
 
-Mở <http://localhost:8080>, đăng nhập:
+Mở <http://localhost:8080> là **vào thẳng database `paperless_meeting`**, không phải chọn loại
+CSDL hay gõ tài khoản. Plugin nhỏ `scripts/adminer/auto-login.php` tự đăng nhập bằng tài khoản
+khai báo trong `docker-compose.yml`. Adminer chỉ mở ở cổng 8080 trên máy này nên việc này chỉ
+dành cho máy dev/demo.
+
+Mở thẳng một bảng bằng đường dẫn, tiện để sẵn tab trước khi demo:
 
 ```text
-System:   PostgreSQL      <-- phải đổi, mặc định form đang chọn MySQL
-Server:   postgres        (đã điền sẵn, là tên service trong Docker)
-Username: paperless
-Password: paperless
-Database: paperless_meeting
+http://localhost:8080/?pgsql=postgres&username=paperless&db=paperless_meeting&ns=public&select=meetings
+http://localhost:8080/?pgsql=postgres&username=paperless&db=paperless_meeting&ns=public&select=meeting_participants
+http://localhost:8080/?pgsql=postgres&username=paperless&db=paperless_meeting&ns=public&select=minutes_signatures
 ```
 
 Sau khi vào: cột trái là danh sách toàn bộ bảng (`meetings`, `meeting_participants`, `votes`, `attendance`, `notifications`...). Bấm tên bảng để xem cấu trúc cột, bấm **Select data** để xem dữ liệu dạng bảng, bấm **SQL command** để chạy câu lệnh bất kỳ.
@@ -686,10 +746,10 @@ User: paperless      Password: paperless
 
 ### Cách 1: bộ truy vấn dựng sẵn để demo (khuyên dùng)
 
-File `scripts/db-demo-queries.sql` gom 12 nhóm truy vấn theo đúng nghiệp vụ: người dùng, cuộc họp và hình thức họp, thành phần tham dự, thống kê điểm danh, chương trình nghị sự, tài liệu số, biểu quyết, chi tiết phiếu bầu, biên bản, nhiệm vụ, thông báo, chat và lịch sử ra vào phòng.
+File `scripts/db-demo-queries.sql` gom 16 nhóm truy vấn theo đúng nghiệp vụ: người dùng, cuộc họp và hình thức họp, thành phần tham dự, thống kê điểm danh, chương trình nghị sự, tài liệu số, biểu quyết, chi tiết phiếu bầu, biên bản, nhiệm vụ, thông báo, chat và lịch sử ra vào phòng, chữ ký số và trạng thái mã hoá khoá ký (không in nội dung khoá), nhật ký truy vết, lời nói ghi thành chữ, hỏi đáp AI.
 
 ```powershell
-docker exec -i paperless-meeting-postgres psql -U paperless -d paperless_meeting -q < scripts/db-demo-queries.sql
+npm run db:queries
 ```
 
 Muốn lưu kết quả ra file để đưa vào báo cáo:

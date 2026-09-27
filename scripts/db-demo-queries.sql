@@ -169,7 +169,65 @@ JOIN users u ON u.id = s.user_id
 ORDER BY s.joined_at DESC
 LIMIT 20;
 
-\echo '\n===== 12. TỔNG SỐ BẢN GHI TỪNG BẢNG ====='
+\echo '\n===== 12. BIÊN BẢN ĐIỆN TỬ: CHỮ KÝ SỐ VÀ MÃ TRA CỨU ====='
+SELECT m.title AS cuoc_hop,
+       mi.status AS trang_thai,
+       COALESCE(mi.verification_code, '(chua ban hanh)') AS ma_tra_cuu,
+       s.signer_name AS nguoi_ky,
+       s.signer_title AS chuc_danh,
+       s.algorithm AS thuat_toan,
+       LEFT(s.content_hash, 16) || '...' AS van_tay_sha256_luc_ky,
+       to_char(s.signed_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'DD/MM HH24:MI:SS') AS ky_luc
+FROM minutes_signatures s
+JOIN minutes mi ON mi.id = s.minutes_id
+JOIN meetings m ON m.id = mi.meeting_id
+ORDER BY s.signed_at DESC;
+
+-- Chỉ cho biết khoá riêng đã được mã hoá hay chưa, KHÔNG in nội dung khoá.
+SELECT u.full_name AS chu_khoa,
+       k.algorithm AS thuat_toan,
+       CASE WHEN k.private_key LIKE 'enc:v1:%' THEN 'Da ma hoa AES-256-GCM'
+            ELSE 'CHUA MA HOA (chay npm run migrate)' END AS khoa_rieng_trong_db,
+       to_char(k.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'DD/MM/YYYY HH24:MI') AS tao_luc
+FROM user_signing_keys k
+JOIN users u ON u.id = k.user_id
+ORDER BY k.created_at;
+
+\echo '\n===== 13. NHẬT KÝ TRUY VẾT (ai làm gì, lúc nào) ====='
+SELECT to_char(a.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'DD/MM HH24:MI:SS') AS luc,
+       a.actor_name AS nguoi_thuc_hien,
+       a.actor_role AS vai_tro,
+       a.action AS hanh_dong,
+       a.entity_type AS doi_tuong,
+       LEFT(a.description, 70) AS mo_ta
+FROM audit_logs a
+ORDER BY a.created_at DESC
+LIMIT 25;
+
+\echo '\n===== 14. LỜI NÓI ĐƯỢC GHI THÀNH CHỮ TRONG PHÒNG HỌP ====='
+SELECT m.title AS cuoc_hop,
+       t.speaker_name AS nguoi_noi,
+       LEFT(t.content, 70) AS noi_dung,
+       t.source AS nguon,
+       to_char(t.spoken_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'DD/MM HH24:MI:SS') AS luc
+FROM meeting_transcripts t
+JOIN meetings m ON m.id = t.meeting_id
+ORDER BY t.spoken_at DESC
+LIMIT 15;
+
+\echo '\n===== 15. HỎI ĐÁP AI VỀ TÀI LIỆU ====='
+SELECT d.display_name AS tai_lieu,
+       q.asked_by_name AS nguoi_hoi,
+       LEFT(q.question, 50) AS cau_hoi,
+       LEFT(q.answer, 70) AS tra_loi,
+       q.model AS mo_hinh,
+       to_char(q.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'DD/MM HH24:MI') AS luc
+FROM document_questions q
+JOIN documents d ON d.id = q.document_id
+ORDER BY q.created_at DESC
+LIMIT 10;
+
+\echo '\n===== 16. TỔNG SỐ BẢN GHI TỪNG BẢNG ====='
 SELECT 'departments' AS bang, COUNT(*) FROM departments
 UNION ALL SELECT 'users', COUNT(*) FROM users
 UNION ALL SELECT 'rooms', COUNT(*) FROM rooms
@@ -185,4 +243,9 @@ UNION ALL SELECT 'meeting_tasks', COUNT(*) FROM meeting_tasks
 UNION ALL SELECT 'chat_messages', COUNT(*) FROM chat_messages
 UNION ALL SELECT 'meeting_sessions', COUNT(*) FROM meeting_sessions
 UNION ALL SELECT 'notifications', COUNT(*) FROM notifications
+UNION ALL SELECT 'minutes_signatures', COUNT(*) FROM minutes_signatures
+UNION ALL SELECT 'user_signing_keys', COUNT(*) FROM user_signing_keys
+UNION ALL SELECT 'audit_logs', COUNT(*) FROM audit_logs
+UNION ALL SELECT 'meeting_transcripts', COUNT(*) FROM meeting_transcripts
+UNION ALL SELECT 'document_questions', COUNT(*) FROM document_questions
 ORDER BY 1;

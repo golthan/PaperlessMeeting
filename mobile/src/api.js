@@ -73,11 +73,12 @@ export function defaultLivekitUrl() {
   return process.env.EXPO_PUBLIC_LIVEKIT_URL || `ws://${apiHost()}:7880`;
 }
 
-export function liveJoinUrl(meetingId, livekitToken) {
+/** livekitUrl: địa chỉ máy chủ trả về (LIVEKIT_WS_URL), không có thì dùng mặc định. */
+export function liveJoinUrl(meetingId, livekitToken, livekitUrl) {
   const webBase = process.env.EXPO_PUBLIC_WEB_URL || `http://${apiHost()}:5173`;
   return `${webBase.replace(/\/$/, "")}/join/${meetingId}#token=${encodeURIComponent(
     livekitToken
-  )}&url=${encodeURIComponent(defaultLivekitUrl())}`;
+  )}&url=${encodeURIComponent(livekitUrl || defaultLivekitUrl())}`;
 }
 
 export function documentDownloadUrl(documentId, token) {

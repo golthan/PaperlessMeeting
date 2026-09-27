@@ -3,6 +3,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { useKeepAwake } from "expo-keep-awake";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -40,7 +41,7 @@ import {
 } from "./meetingUi";
 import { useMeetingRoom, useSocketEvents } from "./realtime";
 import { colors } from "./theme";
-import { getVideoRoom } from "./video";
+import { getVideoKit } from "./video";
 
 const TABS = [
   { key: "room", label: "Phòng họp", icon: "videocam-outline" },
@@ -95,7 +96,10 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
   // Đang họp thì không để màn hình tự tắt.
   useKeepAwake();
 
-  const VideoRoom = useMemo(() => getVideoRoom(), []);
+  // null khi chạy trên Expo Go (không có module video native).
+  const videoKit = useMemo(() => getVideoKit(), []);
+  // Tăng lên mỗi lần người dùng bấm "Bật micro" trong hộp thoại mời phát biểu.
+  const [micRequest, setMicRequest] = useState(0);
 
   const load = useCallback(async () => {
     const [
@@ -227,7 +231,24 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
         current ? { ...current, currentSpeakerId: userId } : current
       );
       if (userId === auth.user?.id) {
-        auth.toast?.success("Chủ tọa mời bạn phát biểu", "Bạn đã được bật micro.");
+        // Chủ tọa chỉ CẤP QUYỀN nói; bật micro hay không là quyền của người được
+        // mời. Không tự mở micro để tránh thu tiếng khi người dùng chưa sẵn sàng.
+        const inVideoRoom = Boolean(videoKit && config?.livekitToken && hasOnlineRoom(meeting));
+        if (inVideoRoom) {
+          Alert.alert(
+            "Chủ tọa mời bạn phát biểu",
+            "Bạn có muốn bật micro ngay không? Bạn có thể bật hoặc tắt micro bất cứ lúc nào bằng nút micro.",
+            [
+              { text: "Để sau", style: "cancel" },
+              { text: "Bật micro", onPress: () => setMicRequest((value) => value + 1) }
+            ]
+          );
+        } else {
+          auth.toast?.success(
+            "Chủ tọa mời bạn phát biểu",
+            "Bật micro khi bạn sẵn sàng nói."
+          );
+        }
       }
       load().catch(() => {});
     },
@@ -468,7 +489,7 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
       auth.toast?.warning("Chưa có phòng online", "Cuộc họp này chưa bật phòng trực tuyến.");
       return;
     }
-    await Linking.openURL(liveJoinUrl(meetingId, config.livekitToken));
+    await Linking.openURL(liveJoinUrl(meetingId, config.livekitToken, livekitUrl));
   }
 
   if (loading) return <LoadingState />;
@@ -482,23 +503,41 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
     );
   }
 
-  const videoStage =
-    onlineRoomOn && config.livekitToken && VideoRoom ? (
-      <VideoRoom
+  const canSpeak = permissions.canSpeak !== false;
+  const videoOn = Boolean(onlineRoomOn && config.livekitToken && videoKit);
+  const videoStage = videoOn ? (
+    <videoKit.Stage
+      canSpeak={canSpeak}
+      canShareScreen={Boolean(permissions.canShareScreen)}
+      expanded={expanded}
+      onToggleExpand={() => setExpanded((value) => !value)}
+      onError={setError}
+      onLeave={onBack}
+    />
+  ) : null;
+
+  /**
+   * Kết nối video bọc NGOÀI cả màn hình: chuyển sang tab chat, tài liệu, biểu
+   * quyết... vẫn nghe được cuộc họp, không bị rớt khỏi phòng video.
+   */
+  function withVideo(content) {
+    if (!videoOn) return content;
+    return (
+      <videoKit.LiveRoom
         serverUrl={livekitUrl}
         token={config.livekitToken}
-        canSpeak={permissions.canSpeak !== false}
-        canShareScreen={Boolean(permissions.canShareScreen)}
-        expanded={expanded}
-        onToggleExpand={() => setExpanded((value) => !value)}
-        onError={(message) => setError(message)}
-        onLeave={onBack}
-      />
-    ) : null;
+        canSpeak={canSpeak}
+        micRequest={micRequest}
+        onError={setError}
+      >
+        {content}
+      </videoKit.LiveRoom>
+    );
+  }
 
   // Toàn màn hình: chỉ còn khung video, các tab tạm ẩn đi.
   if (expanded && videoStage) {
-    return <View style={styles.videoFullScreen}>{videoStage}</View>;
+    return withVideo(<View style={styles.videoFullScreen}>{videoStage}</View>);
   }
 
   const openVotes = asArray(meeting.votes).filter(
@@ -511,7 +550,7 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
     return tab;
   });
 
-  return (
+  return withVideo(
     <View style={styles.detailShell}>
       {!!onBack && (
         <View style={styles.nestedBackBar}>
@@ -519,6 +558,13 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
         </View>
       )}
       <TabStrip tabs={tabs} active={activeTab} onChange={setActiveTab} />
+      {videoOn && activeTab !== "room" && (
+        <videoKit.MiniBar
+          canSpeak={canSpeak}
+          onOpen={() => setActiveTab("room")}
+          onError={setError}
+        />
+      )}
 
       {activeTab === "chat" ? (
         <KeyboardAvoidingView
@@ -566,7 +612,7 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
                         bật phòng trực tuyến — bạn vẫn theo dõi chương trình, tài liệu, biểu
                         quyết và ghi chú ngay tại đây.
                       </Text>
-                    ) : !VideoRoom ? (
+                    ) : !videoKit ? (
                       <>
                         <Text style={styles.muted}>
                           Phòng họp trực tuyến đang bật nhưng bản cài đặt này chưa kèm module
