@@ -823,6 +823,27 @@ export function ChatPanel({ messages, currentUserId, onSend, sending, emptyText 
 }
 
 /**
+ * Nội dung biên bản. Dòng bắt đầu bằng "## " là tiêu đề mục (quy ước chung với
+ * bản PDF): in đậm và bỏ ký hiệu, không để người đọc thấy "## I. THÔNG TIN CHUNG".
+ */
+function MinutesBody({ content }) {
+  const lines = String(content || "").replace(/\r\n/g, "\n").split("\n");
+  return (
+    <Text style={styles.minutesText}>
+      {lines.map((line, index) => {
+        const heading = line.startsWith("## ");
+        return (
+          <Text key={index} style={heading ? styles.minutesHeading : null}>
+            {heading ? line.slice(3) : line}
+            {index < lines.length - 1 ? "\n" : ""}
+          </Text>
+        );
+      })}
+    </Text>
+  );
+}
+
+/**
  * Hồ sơ biên bản điện tử.
  *
  * Người tham dự chỉ thấy biên bản đã ban hành. Ai là thư ký của cuộc họp thì ký
@@ -1041,7 +1062,7 @@ export function MinutesPanel({
           </View>
 
           <ErrorState message={error} />
-          <Text style={styles.minutesText}>{minutes.content}</Text>
+          <MinutesBody content={minutes.content} />
           {!!minutes.conclusion && (
             <>
               <Text style={styles.groupLabel}>Kết luận</Text>
@@ -1173,6 +1194,10 @@ export const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
     lineHeight: 24
+  },
+  minutesHeading: {
+    color: colors.primaryDark,
+    fontWeight: "800"
   },
 
   /* Tab ngang */

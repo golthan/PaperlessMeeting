@@ -85,7 +85,7 @@ publicNotesRouter.post(
 
     // Chỉ lấy chat chung của phòng; thảo luận trong hộp tài liệu thuộc về tài liệu đó.
     // Lời nói lấy từ bản ghi transcript — hai nguồn được trộn theo thời gian.
-    const [chat, agenda, speech] = await Promise.all([
+    const [chat, agenda, speech, votes, tasks] = await Promise.all([
       pool.query(
         `SELECT cm.content, cm.created_at, u.full_name AS sender_name, u.email AS sender_email
          FROM chat_messages cm
@@ -105,6 +105,21 @@ publicNotesRouter.post(
          WHERE meeting_id = $1
          ORDER BY spoken_at ASC`,
         [req.params.meetingId]
+      ),
+      // Chỉ để AI biết những gì đã có mục riêng trong biên bản, tránh viết mâu thuẫn.
+      pool.query(
+        `SELECT title, status FROM votes
+         WHERE meeting_id = $1 AND status IN ('OPEN', 'CLOSED')
+         ORDER BY created_at ASC`,
+        [req.params.meetingId]
+      ),
+      pool.query(
+        `SELECT t.title, u.full_name AS assignee_name
+         FROM meeting_tasks t
+         JOIN users u ON u.id = t.assigned_to
+         WHERE t.meeting_id = $1 AND t.deleted_at IS NULL
+         ORDER BY t.created_at ASC`,
+        [req.params.meetingId]
       )
     ]);
 
@@ -119,7 +134,9 @@ publicNotesRouter.post(
       meeting,
       agenda: agenda.rows,
       messages: chat.rows,
-      speech: speech.rows
+      speech: speech.rows,
+      votes: votes.rows,
+      tasks: tasks.rows
     });
 
     // Ghi lại đã lấy từ đâu để biên bản nói đúng nguồn của bản nháp.

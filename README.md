@@ -444,8 +444,11 @@ Cấu hình trong `backend/.env`:
 
 ```text
 ANTHROPIC_API_KEY=sk-ant-...
-AI_MODEL=claude-opus-5
+AI_MODEL=claude-opus-5-5
 ```
+
+Tên model viết bằng **dấu gạch ngang** (`claude-opus-5-5`). Viết `claude-opus-5.5` thì Anthropic trả
+404 "model not found" và mọi nút AI đều báo lỗi. Sửa `.env` xong phải khởi động lại backend.
 
 Không đặt khoá thì hai nút AI tự ẩn và API trả thông báo rõ ràng — phần còn lại của hệ thống chạy bình thường.
 
