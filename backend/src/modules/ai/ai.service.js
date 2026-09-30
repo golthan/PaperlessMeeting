@@ -163,17 +163,24 @@ function extractText(response) {
   );
 }
 
-/** Lấy trích dẫn (đoạn trích + số trang) để hiển thị dưới câu trả lời. */
+/**
+ * Lấy trích dẫn (đoạn trích + số trang) để hiển thị dưới câu trả lời.
+ * API trả end_page_number theo kiểu không bao gồm (đoạn ở trang 1 → 1..2),
+ * nên trừ 1 để endPage là trang cuối thật sự chứa đoạn trích.
+ */
 function extractCitations(response) {
   const citations = [];
   for (const block of response.content) {
     if (block.type !== "text" || !Array.isArray(block.citations)) continue;
     for (const citation of block.citations) {
+      const startPage = citation.start_page_number ?? null;
+      const endExclusive = citation.end_page_number ?? null;
       citations.push({
         citedText: citation.cited_text,
         documentTitle: citation.document_title || null,
-        startPage: citation.start_page_number ?? null,
-        endPage: citation.end_page_number ?? null
+        startPage,
+        endPage:
+          endExclusive == null ? null : Math.max(endExclusive - 1, startPage ?? 1)
       });
     }
   }

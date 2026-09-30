@@ -116,7 +116,7 @@ export function Layout() {
         </nav>
         <div className="sidebar-foot">
           <p>Hệ thống phòng họp không giấy tờ</p>
-          <span>Phiên bản đồ án tốt nghiệp</span>
+          <span>Học viện Kỹ thuật Mật mã</span>
         </div>
       </aside>
 

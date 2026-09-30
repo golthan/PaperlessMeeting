@@ -185,7 +185,10 @@ export function DocumentRoom({
         token: auth.token,
         body: { question: content }
       });
-      setQuestions((current) => [...current, result.data]);
+      // Sự kiện Socket.IO có thể đến trước phản hồi này, nên bỏ qua nếu đã có.
+      setQuestions((current) =>
+        current.some((item) => item.id === result.data.id) ? current : [...current, result.data]
+      );
       setQuestion("");
     });
   };
