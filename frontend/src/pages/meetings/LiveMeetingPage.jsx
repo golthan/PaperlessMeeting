@@ -734,10 +734,13 @@ export function LiveMeetingPage() {
     setError("");
     try {
       const res = await api.post(`/documents/${document.id}/ask`, { question });
-      setDocumentQuestions((current) => ({
-        ...current,
-        [document.id]: [...(current[document.id] || []), res.data.data]
-      }));
+      const record = res.data.data;
+      // Sự kiện Socket.IO có thể đến trước phản hồi này, nên bỏ qua nếu đã có.
+      setDocumentQuestions((current) => {
+        const existing = current[document.id] || [];
+        if (existing.some((item) => item.id === record.id)) return current;
+        return { ...current, [document.id]: [...existing, record] };
+      });
       return true;
     } catch (err) {
       setError(err.response?.data?.message || "Không hỏi được AI về tài liệu");

@@ -367,6 +367,9 @@ CREATE TABLE IF NOT EXISTS document_questions (
 CREATE INDEX IF NOT EXISTS idx_document_questions_document
   ON document_questions(document_id, created_at);
 
+-- Trích dẫn (đoạn trích + số trang) lưu kèm câu trả lời để xem lại sau khi tải lại trang.
+ALTER TABLE document_questions ADD COLUMN IF NOT EXISTS citations JSONB NOT NULL DEFAULT '[]'::jsonb;
+
 -- Biên bản: mốc tự sinh, mã tra cứu công khai và hash toàn vẹn.
 ALTER TABLE minutes ADD COLUMN IF NOT EXISTS generated_at TIMESTAMPTZ;
 ALTER TABLE minutes ADD COLUMN IF NOT EXISTS content_hash CHAR(64);

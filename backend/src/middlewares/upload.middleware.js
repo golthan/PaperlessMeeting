@@ -3,6 +3,7 @@ import path from "path";
 import { v4 as uuid } from "uuid";
 import { env } from "../config/env.js";
 import { ensureUploadDir, isAllowedDocument, uploadRoot } from "../utils/file.js";
+import { badRequest } from "../utils/httpError.js";
 
 ensureUploadDir();
 
@@ -23,7 +24,8 @@ export const uploadDocument = multer({
   },
   fileFilter: (_req, file, cb) => {
     if (!isAllowedDocument(file.originalname)) {
-      cb(new Error("Only PDF, DOCX, PPTX and XLSX files are allowed"));
+      // Lỗi của yêu cầu nên trả 400, không để middleware lỗi coi là 500.
+      cb(badRequest("Chỉ chấp nhận tệp PDF, DOCX, PPTX hoặc XLSX"));
       return;
     }
     cb(null, true);

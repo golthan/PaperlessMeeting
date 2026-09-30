@@ -582,8 +582,8 @@ documentsRouter.post(
 
     const { rows } = await pool.query(
       `INSERT INTO document_questions
-         (document_id, meeting_id, asked_by, asked_by_name, question, answer, model)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (document_id, meeting_id, asked_by, asked_by_name, question, answer, model, citations)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         req.params.id,
@@ -592,11 +592,12 @@ documentsRouter.post(
         req.user.full_name,
         question,
         answer,
-        model
+        model,
+        JSON.stringify(citations || [])
       ]
     );
 
-    const record = { ...rows[0], citations };
+    const record = rows[0];
     emitMeetingEvent(document.meeting_id, "document_question_added", record);
     await writeAuditLog(req, {
       action: AUDIT_ACTIONS.DOCUMENT_AI_ASK,
