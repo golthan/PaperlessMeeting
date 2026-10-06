@@ -72,17 +72,17 @@ export function LoginPage() {
           </button>
           <div className="demo-logins">
             <button type="button" onClick={() => fill("admin@example.com")}>
-              Admin
+              Quản trị
             </button>
             <button type="button" onClick={() => fill("organizer@example.com")}>
-              Organizer
+              Người tổ chức
             </button>
             <button type="button" onClick={() => fill("participant1@example.com")}>
-              Participant
+              Người tham dự
             </button>
           </div>
           <p className="muted">
-            Chưa có tài khoản? <Link to="/register">Đăng ký participant</Link>
+            Chưa có tài khoản? <Link to="/register">Đăng ký tài khoản</Link>
           </p>
         </form>
       </section>

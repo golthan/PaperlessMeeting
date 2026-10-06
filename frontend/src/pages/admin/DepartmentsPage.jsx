@@ -61,7 +61,7 @@ export function DepartmentsPage() {
         title="Quản lý phòng ban"
         subtitle={`${items.length} phòng ban đang hoạt động`}
         backTo="/admin/dashboard"
-        backLabel="Về Dashboard"
+        backLabel="Về trang tổng quan"
       />
 
       <div className="split-page">

@@ -151,7 +151,7 @@ export function UsersPage() {
         title="Quản lý người dùng"
         subtitle={`${items.length} tài khoản trong hệ thống`}
         backTo="/admin/dashboard"
-        backLabel="Về Dashboard"
+        backLabel="Về trang tổng quan"
       />
 
       <section className="panel">
@@ -331,7 +331,7 @@ export function UsersPage() {
                 <tr>
                   <th>Họ tên</th>
                   <th>Email</th>
-                  <th>Role</th>
+                  <th>Vai trò</th>
                   <th>Trạng thái</th>
                   <th>Phòng ban</th>
                   <th></th>

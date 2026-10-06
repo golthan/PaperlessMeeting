@@ -109,11 +109,11 @@ export function LoginScreen({ auth, booting }) {
         />
         <View style={styles.quickLoginRow}>
           <SecondaryButton
-            title="Participant 1"
+            title="Người dự mẫu 1"
             onPress={() => setEmail("participant1@example.com")}
           />
           <SecondaryButton
-            title="Participant 2"
+            title="Người dự mẫu 2"
             onPress={() => setEmail("participant2@example.com")}
           />
         </View>
@@ -578,7 +578,7 @@ export function DashboardScreen({ auth, refreshKey }) {
           <View style={styles.statGrid}>
             <StatBox icon="calendar-outline" label="Lời mời họp" value={data.invitedMeetings} />
             <StatBox icon="time-outline" label="Chờ phản hồi" value={data.pendingInvites} />
-            <StatBox icon="checkbox-outline" label="Vote đang mở" value={data.openVotes} />
+            <StatBox icon="checkbox-outline" label="Biểu quyết đang mở" value={data.openVotes} />
             <StatBox
               icon="list-outline"
               label="Nhiệm vụ"
@@ -626,7 +626,7 @@ function MeetingCard({ meeting, busy, onOpen, onJoin, onRespond }) {
         </View>
         <Text style={styles.muted}>{formatDateTime(meeting.start_time)}</Text>
         <Text style={styles.muted}>{meetingPlaceLabel(meeting)}</Text>
-        <Text style={styles.muted}>Chủ tọa: {meeting.organizer_name || "-"}</Text>
+        <Text style={styles.muted}>Chủ tọa: {meeting.chairman_name || meeting.organizer_name || "-"}</Text>
       </Pressable>
       <View style={styles.rowWrap}>
         <StatusPill value={meeting.invitation_status} />

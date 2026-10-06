@@ -258,7 +258,7 @@ export function LiveMeetingPage() {
     socket.on("connect", () => {
       setSocketState("online");
       socket.emit("join_meeting_room", { meetingId: id }, (reply) => {
-        if (!reply?.ok) setError(reply?.message || "Không vào được phòng realtime");
+        if (!reply?.ok) setError(reply?.message || "Không vào được phòng họp");
         else if (reply.autoAttendance) {
           setNotice(
             reply.autoAttendance.status === "LATE"
@@ -881,7 +881,7 @@ export function LiveMeetingPage() {
             <p>
               {formatDateTime(meeting.start_time)} · {meetingPlaceLabel(meeting)} ·{" "}
               <span className={`live-signal is-${socketState}`}>
-                realtime{" "}
+                đồng bộ{" "}
                 {socketState === "online"
                   ? "đã kết nối"
                   : socketState === "offline"
@@ -977,7 +977,7 @@ export function LiveMeetingPage() {
               participants={participants}
               filter={peopleFilter}
               onFilter={setPeopleFilter}
-              organizerName={meeting.organizer_name}
+              organizerName={meeting.chairman_name || meeting.organizer_name}
               currentUserId={user.id}
               canMark={perm.canMarkAttendance && !meetingClosed}
               onMark={markAttendance}
@@ -1406,7 +1406,11 @@ function PeopleGroup({
                 {item.user_id === currentUserId ? " (bạn)" : ""}
               </strong>
               <small>
-                {item.role_in_meeting === "SECRETARY" ? "Thư ký" : "Thành viên"}
+                {item.role_in_meeting === "CHAIRMAN"
+                  ? "Chủ tọa"
+                  : item.role_in_meeting === "SECRETARY"
+                    ? "Thư ký"
+                    : "Thành viên"}
                 {item.department_name ? ` · ${item.department_name}` : ""}
               </small>
             </div>

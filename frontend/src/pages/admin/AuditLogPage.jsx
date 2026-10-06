@@ -118,7 +118,7 @@ export function AuditLogPage() {
         title="Nhật ký truy vết"
         subtitle={`${total} bản ghi khớp bộ lọc`}
         backTo={roleHome("ADMIN")}
-        backLabel="Về Dashboard"
+        backLabel="Về trang tổng quan"
         actions={
           <div className="row-actions">
             <button className="secondary-button" onClick={load} disabled={loading}>

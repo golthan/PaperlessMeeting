@@ -150,10 +150,10 @@ export function MeetingTopCard({
             />
             <Text style={styles.signalText}>
               {realtimeStatus === "online"
-                ? "Realtime đã kết nối"
+                ? "Đồng bộ trực tiếp đã kết nối"
                 : realtimeStatus === "connecting"
-                  ? "Đang kết nối realtime"
-                  : "Mất kết nối realtime"}
+                  ? "Đang kết nối đồng bộ"
+                  : "Mất kết nối đồng bộ"}
             </Text>
           </View>
         )}
