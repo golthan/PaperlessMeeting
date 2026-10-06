@@ -11,3 +11,7 @@ mobile/dist/
 # expo prebuild tự sinh lại được, không cần theo dõi
 mobile/android/
 mobile/ios/
+
+# tệp sinh ra khi chạy kiểm thử
+scripts/kiem-thu/files/
+scripts/kiem-thu/ket-qua/

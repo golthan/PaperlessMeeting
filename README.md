@@ -48,6 +48,7 @@ chạy lại bao nhiêu lần cũng được. **Không reset hay seed database**
 | `npm run android:build` | Build lại APK sau khi sửa code mobile, tự cài và mở lại app |
 | `npm run db:view` | Mở Adminer (tự đăng nhập) và pgAdmin (có sơ đồ ERD) |
 | `npm run db:queries` | In ra bộ truy vấn demo theo nghiệp vụ (16 nhóm) |
+| `npm run test:api` | Chạy 57 ca kiểm thử API của Chương 5 (cần backend và Docker đang chạy); tự tạo rồi tự xoá dữ liệu thử, kết quả ở `scripts/kiem-thu/ket-qua/` |
 
 Backend và web chạy ở hai cửa sổ PowerShell riêng tên `Paperless - backend` và `Paperless - web`
 để xem log; đóng cửa sổ là tắt dịch vụ đó.
