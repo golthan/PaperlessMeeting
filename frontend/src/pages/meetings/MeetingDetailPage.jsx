@@ -26,7 +26,7 @@ import { useAuth } from "../../auth/AuthContext.jsx";
 import { DocumentWorkspace } from "../../components/DocumentWorkspace.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
 import { PageHeader } from "../../components/PageHeader.jsx";
-import { StatusPill } from "../../components/StatusPill.jsx";
+import { StatusPill, statusLabel } from "../../components/StatusPill.jsx";
 import { TranscriptPanel } from "../../components/TranscriptPanel.jsx";
 import { useToast } from "../../components/ToastProvider.jsx";
 import { MinutesPanel } from "../../components/MinutesPanel.jsx";
@@ -697,7 +697,7 @@ export function MeetingDetailPage() {
       <PageHeader
         eyebrow="Hồ sơ cuộc họp"
         title={meeting.title}
-        subtitle={`${formatDateTime(meeting.start_time)} · ${meeting.status}`}
+        subtitle={`${formatDateTime(meeting.start_time)} · ${statusLabel(meeting.status)}`}
         backTo={meetingsListPath}
         backLabel="Danh sách cuộc họp"
       />

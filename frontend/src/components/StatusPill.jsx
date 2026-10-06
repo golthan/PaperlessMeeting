@@ -101,3 +101,8 @@ export function StatusPill({ value, kind, label }) {
   const text = label || contextLabels[kind]?.[value] || labels[value] || value;
   return <span className={`pill ${tones[value] || "neutral"}`}>{text}</span>;
 }
+
+/** Nhãn tiếng Việt của một giá trị trạng thái, dùng khi cần chữ thuần thay vì viên nhãn. */
+export function statusLabel(value) {
+  return labels[value] || value;
+}

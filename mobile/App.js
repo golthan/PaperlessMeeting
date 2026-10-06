@@ -219,7 +219,7 @@ function titleByScreen(name) {
   if (name === "tasks") return "Nhiệm vụ của tôi";
   if (name === "notifications") return "Thông báo";
   if (name === "profile") return "Hồ sơ cá nhân";
-  return "Dashboard";
+  return "Tổng quan";
 }
 
 const styles = StyleSheet.create({

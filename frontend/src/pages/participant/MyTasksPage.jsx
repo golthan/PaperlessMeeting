@@ -88,7 +88,7 @@ export function MyTasksPage() {
         title="Nhiệm vụ của tôi"
         subtitle="Các công việc được giao trong những cuộc họp bạn tham dự"
         backTo="/participant/dashboard"
-        backLabel="Về Dashboard"
+        backLabel="Về trang tổng quan"
         actions={
           <button
             className="ghost-button"

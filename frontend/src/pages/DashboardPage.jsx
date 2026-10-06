@@ -19,7 +19,7 @@ const labels = {
   totalVotes: "Biểu quyết",
   invitedMeetings: "Lời mời họp",
   pendingInvites: "Chờ phản hồi",
-  openVotes: "Vote đang mở"
+  openVotes: "Biểu quyết đang mở"
 };
 
 const quickLinksByRole = {

@@ -90,7 +90,7 @@ export function ProfilePage() {
         title="Hồ sơ cá nhân"
         subtitle="Cập nhật thông tin hiển thị của bạn trong các cuộc họp, biên bản và nhật ký"
         backTo={roleHome(user?.role)}
-        backLabel="Về Dashboard"
+        backLabel="Về trang tổng quan"
       />
 
       <section className="panel">

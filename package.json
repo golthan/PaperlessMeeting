@@ -27,6 +27,7 @@
     "migrate": "npm --workspace backend run migrate",
     "db:view": "powershell -ExecutionPolicy Bypass -File scripts/open-db.ps1",
     "db:queries": "docker exec -i paperless-meeting-postgres psql -U paperless -d paperless_meeting -q < scripts/db-demo-queries.sql",
-    "check": "npm --workspace backend run check && npm --workspace frontend run build && npm --workspace mobile run export:android"
+    "check": "npm --workspace backend run check && npm --workspace frontend run build && npm --workspace mobile run export:android",
+    "test:api": "node scripts/kiem-thu/api-test.mjs"
   }
 }

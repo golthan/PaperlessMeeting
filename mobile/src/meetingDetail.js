@@ -238,6 +238,7 @@ export function MeetingDetailScreen({
   }
 
   const me = asArray(meeting.participants).find((item) => item.user_id === auth.user?.id);
+  const chairman = asArray(meeting.participants).find((item) => item.role_in_meeting === "CHAIRMAN");
   // Máy chủ đã tính sẵn quyền theo vai trò trong cuộc họp.
   const perm = meeting.permissions || {};
   const canJoinRoom = ["ONGOING", "UPCOMING"].includes(meeting.status);
@@ -309,7 +310,7 @@ export function MeetingDetailScreen({
             <Panel>
               <SectionTitle title="Thông tin chung" />
               <View style={styles.stack}>
-                <InfoRow label="Chủ tọa" value={meeting.organizer_name} />
+                <InfoRow label="Chủ tọa" value={chairman?.full_name || "Chưa chỉ định"} />
                 <InfoRow label="Hình thức" value={<StatusPill value={meeting.meeting_type} />} />
                 <InfoRow
                   label="Lời mời của bạn"

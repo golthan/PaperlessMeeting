@@ -22,7 +22,7 @@ import brandLogo from "../assets/logo-hvktmm.png";
 
 const navByRole = {
   ADMIN: [
-    ["Dashboard", "/admin/dashboard", LayoutDashboard],
+    ["Tổng quan", "/admin/dashboard", LayoutDashboard],
     ["Người dùng", "/admin/users", Users],
     ["Phòng ban", "/admin/departments", Network],
     ["Phòng họp", "/admin/rooms", DoorOpen],
@@ -32,13 +32,13 @@ const navByRole = {
     ["Hồ sơ cá nhân", "/profile", UserCog]
   ],
   ORGANIZER: [
-    ["Dashboard", "/organizer/dashboard", LayoutDashboard],
+    ["Tổng quan", "/organizer/dashboard", LayoutDashboard],
     ["Cuộc họp", "/organizer/meetings", CalendarDays],
     ["Thông báo", "/organizer/notifications", Bell],
     ["Hồ sơ cá nhân", "/profile", UserCog]
   ],
   PARTICIPANT: [
-    ["Dashboard", "/participant/dashboard", LayoutDashboard],
+    ["Tổng quan", "/participant/dashboard", LayoutDashboard],
     ["Cuộc họp", "/participant/meetings", CalendarDays],
     ["Nhiệm vụ", "/participant/tasks", CheckSquare],
     ["Thông báo", "/participant/notifications", Bell],
@@ -74,7 +74,7 @@ function pageTitle(pathname) {
   if (/\/meetings\/[^/]+$/.test(pathname)) return "Chi tiết cuộc họp";
   if (pathname.includes("meetings")) return "Quản lý cuộc họp";
   if (pathname.includes("tasks")) return "Nhiệm vụ của tôi";
-  return "Dashboard";
+  return "Tổng quan";
 }
 
 export function Layout() {

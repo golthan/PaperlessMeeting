@@ -141,16 +141,16 @@ export function MeetingsPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow={user.role === "PARTICIPANT" ? "Lời mời của tôi" : "Meeting hub"}
+        eyebrow={user.role === "PARTICIPANT" ? "Lời mời của tôi" : "Lịch họp"}
         title={user.role === "PARTICIPANT" ? "Cuộc họp được mời" : "Quản lý cuộc họp"}
         subtitle={`${meetings.length} cuộc họp trong danh sách`}
         backTo={roleHome(user.role)}
-        backLabel="Về Dashboard"
+        backLabel="Về trang tổng quan"
         actions={
           user.role === "ORGANIZER" && (
             <button className="primary-button" onClick={() => setShowForm(!showForm)}>
               <CalendarPlus size={16} />
-              {showForm ? "Thu gọn form" : "Tạo cuộc họp"}
+              {showForm ? "Thu gọn biểu mẫu" : "Tạo cuộc họp"}
             </button>
           )
         }
@@ -160,7 +160,7 @@ export function MeetingsPage() {
         <section className="panel create-meeting-panel">
           <div className="section-heading row">
             <div>
-              <span className="eyebrow">Organizer workspace</span>
+              <span className="eyebrow">Người tổ chức</span>
               <h2>Tạo cuộc họp</h2>
             </div>
             <button className="secondary-button" onClick={() => setShowForm(!showForm)}>
@@ -191,7 +191,7 @@ export function MeetingsPage() {
         <div className="section-heading">
           <div>
             <span className="eyebrow">
-              {user.role === "PARTICIPANT" ? "Lời mời của tôi" : "Meeting hub"}
+              {user.role === "PARTICIPANT" ? "Lời mời của tôi" : "Lịch họp"}
             </span>
             <h2>{user.role === "PARTICIPANT" ? "Cuộc họp được mời" : "Danh sách cuộc họp"}</h2>
           </div>

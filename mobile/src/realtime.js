@@ -118,7 +118,7 @@ export function useMeetingRoom(socket, meetingId, options = {}) {
       socket.emit("join_meeting_room", { meetingId }, (reply) => {
         if (!active) return;
         if (reply?.ok) optionsRef.current.onJoined?.(reply);
-        else optionsRef.current.onError?.(reply?.message || "Không vào được phòng họp realtime");
+        else optionsRef.current.onError?.(reply?.message || "Không vào được phòng họp");
       });
     }
 

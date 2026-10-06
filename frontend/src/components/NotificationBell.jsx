@@ -77,7 +77,7 @@ export function NotificationBell() {
               <strong>Thông báo</strong>
               <span className={connected ? "notif-live" : "notif-live is-off"}>
                 {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
-                {connected ? "Đang nhận realtime" : "Mất kết nối realtime"}
+                {connected ? "Đang nhận thông báo trực tiếp" : "Mất kết nối thông báo trực tiếp"}
               </span>
             </div>
             {unread > 0 && (

@@ -46,7 +46,7 @@ export function NotificationsPage() {
             : "Bạn đã đọc hết thông báo"
         }
         backTo={roleHome(user?.role)}
-        backLabel="Về Dashboard"
+        backLabel="Về trang tổng quan"
         actions={
           <>
             <button

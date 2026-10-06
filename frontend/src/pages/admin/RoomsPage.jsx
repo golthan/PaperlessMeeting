@@ -68,7 +68,7 @@ export function RoomsPage() {
         title="Quản lý phòng họp"
         subtitle={`${items.length} phòng trong danh mục`}
         backTo="/admin/dashboard"
-        backLabel="Về Dashboard"
+        backLabel="Về trang tổng quan"
       />
 
       <div className="split-page">

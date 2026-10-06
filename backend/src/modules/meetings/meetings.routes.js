@@ -189,6 +189,8 @@ meetingsRouter.get(
 
     const { rows } = await pool.query(
       `SELECT m.*, r.name AS room_name, u.full_name AS organizer_name,
+              (SELECT cu.full_name FROM meeting_participants cp JOIN users cu ON cu.id = cp.user_id
+               WHERE cp.meeting_id = m.id AND cp.role_in_meeting = 'CHAIRMAN' LIMIT 1) AS chairman_name,
               COUNT(mp.id)::int AS participant_count,
               COUNT(*) OVER() AS total_count
        FROM meetings m
@@ -232,6 +234,8 @@ meetingsRouter.get(
   asyncHandler(async (req, res) => {
     const { rows } = await pool.query(
       `SELECT m.*, r.name AS room_name, u.full_name AS organizer_name,
+              (SELECT cu.full_name FROM meeting_participants cp JOIN users cu ON cu.id = cp.user_id
+               WHERE cp.meeting_id = m.id AND cp.role_in_meeting = 'CHAIRMAN' LIMIT 1) AS chairman_name,
               mp.invitation_status, mp.attendance_status, mp.checked_in_at,
               (
                 SELECT COUNT(*)::int

@@ -4,7 +4,10 @@ import { forbidden, notFound } from "../../utils/httpError.js";
 export async function getMeeting(meetingId) {
   const { rows } = await pool.query(
     `SELECT m.*, r.name AS room_name, r.location AS room_location,
-            u.full_name AS organizer_name, u.email AS organizer_email
+            u.full_name AS organizer_name, u.email AS organizer_email,
+            -- Người lập lịch chưa chắc là chủ tọa: lấy tên chủ tọa từ thành phần tham dự.
+            (SELECT cu.full_name FROM meeting_participants cp JOIN users cu ON cu.id = cp.user_id
+             WHERE cp.meeting_id = m.id AND cp.role_in_meeting = 'CHAIRMAN' LIMIT 1) AS chairman_name
      FROM meetings m
      LEFT JOIN rooms r ON r.id = m.room_id
      JOIN users u ON u.id = m.organizer_id

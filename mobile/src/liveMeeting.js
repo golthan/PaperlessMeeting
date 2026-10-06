@@ -337,7 +337,7 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
 
   function toggleHand() {
     if (!socket?.connected) {
-      auth.toast?.warning("Mất kết nối realtime", "Không gửi được tín hiệu giơ tay.");
+      auth.toast?.warning("Mất kết nối đồng bộ", "Không gửi được tín hiệu giơ tay.");
       return;
     }
     socket.emit(me?.is_hand_raised ? "lower_hand" : "raise_hand", { meetingId });
@@ -682,7 +682,7 @@ export function LiveMeetingScreen({ auth, meetingId, socket, realtimeStatus, onB
             <ParticipantsPanel
               participants={meeting.participants}
               currentUserId={auth.user?.id}
-              organizerName={meeting.organizer_name}
+              organizerName={meeting.chairman_name || meeting.organizer_name}
               showPresence
             />
           )}
